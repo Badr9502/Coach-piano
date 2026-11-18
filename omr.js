@@ -559,7 +559,7 @@ function analyser(G, opts = {}) {
       const tour = remp(x - 0.5 * s, yd - 0.5 * s, x + 0.5 * s, yd + 0.5 * s);
       const aire = 1, petit = (0.32 * 0.32);
       const anneau = (tour * aire - c * petit) / (aire - petit);
-      if (anneau < 0.22) { const comp = compDe(x, yd); if (comp && comp.w < 0.7 * s && comp.h < 0.7 * s) { t.point = true; break; } }
+      if (anneau < 0.22) { const comp = compDe(x, yd); if (comp && comp.w < 0.8 * s && comp.h < 1.0 * s) { t.point = true; break; } }
     }
   });
 
@@ -625,7 +625,7 @@ function analyser(G, opts = {}) {
     if (avecTete.has(c.id)) return;
     portees.forEach(P => {
       const s = P.s;
-      if (c.w > 0.45 * s || c.x0 < P.debutMusique - 0.5 * s) return;
+      if (c.w > 0.65 * s || c.x0 < P.debutMusique - 0.5 * s) return;
       if (c.y0 <= P.haut + 0.4 * s && c.y1 >= P.bas - 0.4 * s && c.h >= 3.6 * s) {
         // la barre doit s'arrêter aux lignes extrêmes (pas une hampe isolée)
         const finHaut = c.y0 >= P.haut - 0.6 * s || (piano && P.role === 'bas'), finBas = c.y1 <= P.bas + 0.6 * s || (piano && P.role === 'haut');
@@ -664,6 +664,11 @@ function analyser(G, opts = {}) {
         // soupir (une seule masse par ligne) vs altération (deux traits)
         const rows = [0.3, 0.5, 0.7].map(f => segmentsLigne(lab, w, c.id, Math.round(c.y0 + f * c.h), c.x0, c.x1));
         if (rows.every(n => n <= 1)) dur = 1;
+        else if (rx > 0.7 && formeAlteration(b, w, c, P) === 'autre') {
+          // quart de soupir : trait oblique + deux crochets à gauche (pas de trait vertical droit comme un dièse)
+          const deux = [0.15, 0.25, 0.35, 0.45, 0.55, 0.65].filter(f => segmentsLigne(lab, w, c.id, Math.round(c.y0 + f * c.h), c.x0, c.x1) >= 2).length;
+          if (deux >= 1) dur = 0.25;
+        }
       } else if (ry >= 1.2 && ry < 2.15 && rx > 0.45 && rx < 1.3 && fill < 0.6) dur = 0.5;
       if (dur) {
         if (T.some(t => t.P === P && Math.abs(t.x - (c.x0 + c.x1) / 2) < 0.8 * s)) return;

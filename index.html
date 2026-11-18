@@ -55,6 +55,8 @@
   .note .doigt { display: inline-block; width: 24px; height: 24px; line-height: 24px; border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; font-size: .9rem; }
   .note .nom { display: block; font-size: .85rem; margin-top: 2px; font-weight: 600; }
   .note .duree { display: block; font-size: .66rem; color: var(--doux); }
+  .note.liee { opacity: .55; border-style: dashed; }
+  .note.liee .duree::before { content: "⌒ "; }
   .note.noire-touche .nom::after { content: " ■"; font-size: .55rem; vertical-align: middle; color: #444; }
   .note.courante { transform: scale(1.12); background: #fff6d6; border-color: #e8c547; }
   .note.ok { background: #e3f4ea; border-color: var(--ok); }
@@ -247,10 +249,9 @@ function parseTexte(txt, beatsPerBar = 4) {
     if (/^(r|x|-|silence)$/i.test(n)) { beat += dur; lieeAvant = null; continue; }
     const midi = parseNom(n);
     if (midi == null) { errors.push(raw); continue; }
-    if (lieeAvant && lieeAvant.midi === midi) lieeAvant.dur += dur;
-    else events.push({ midi, beat, dur, bar });
-    if (lie) lieeAvant = lieeAvant && lieeAvant.midi === midi ? lieeAvant : events[events.length - 1];
-    else lieeAvant = null;
+    // note liée à la précédente : carte à part (dans sa mesure), mais ni rejouée ni attendue
+    events.push({ midi, beat, dur, bar, liee: !!(lieeAvant && lieeAvant.midi === midi) });
+    lieeAvant = lie ? events[events.length - 1] : null;
     beat += dur;
   }
   if (!barres) { // mesures automatiques
@@ -392,7 +393,8 @@ function doigter(events, main) {
 // =====================================================================
 function analyserTempo(events, cible, niveau) {
   const iois = [];
-  for (let i = 1; i < events.length; i++) { const d = events[i].beat - events[i - 1].beat; if (d > 1e-6) iois.push(d); }
+  const attaques = events.filter(e => !e.liee);
+  for (let i = 1; i < attaques.length; i++) { const d = attaques[i].beat - attaques[i - 1].beat; if (d > 1e-6) iois.push(d); }
   const ioiMin = iois.length ? Math.min(...iois) : 1;
   const notesSec = cible / 60 / ioiMin;
   let sauts = 0;
@@ -601,7 +603,7 @@ function afficherAnalyse() {
       mesureEl.innerHTML = `<span class="num">${e.bar}</span>`; part.appendChild(mesureEl);
     }
     const c = document.createElement('div');
-    c.className = 'note' + (estNoire(e.midi) ? ' noire-touche' : '');
+    c.className = 'note' + (estNoire(e.midi) ? ' noire-touche' : '') + (e.liee ? ' liee' : '');
     c.innerHTML = `<span class="doigt">${e.doigt}</span><span class="nom">${nomNote(e.midi)}</span><span class="duree">${nomDuree(e.dur)}</span>`;
     c.title = `Mesure ${e.bar} — ${nomNote(e.midi)}, doigt ${e.doigt}`;
     mesureEl.appendChild(c); S.cartes[i] = c;
@@ -618,7 +620,8 @@ function segment() {
   const base = m.barStarts[de - 1];
   const finB = a < nb ? m.barStarts[a] : m.totalBeats;
   const idx = []; m.events.forEach((e, i) => { if (e.bar >= de && e.bar <= a) idx.push(i); });
-  const iois = []; for (let k = 1; k < idx.length; k++) iois.push(m.events[idx[k]].beat - m.events[idx[k - 1]].beat);
+  const att = idx.filter(i => !m.events[i].liee);
+  const iois = []; for (let k = 1; k < att.length; k++) iois.push(m.events[att[k]].beat - m.events[att[k - 1]].beat);
   return { de, a, base, finB, idx, ioiMin: iois.length ? Math.min(...iois.filter(x => x > 0)) : 1 };
 }
 
@@ -716,9 +719,13 @@ function programmer(mode, seg, bpm, avecNotes) {
   const t0 = ctx.currentTime + 0.4, debut = t0 + bpb * spb;
   const nbTemps = Math.ceil(seg.finB - seg.base - 1e-9);
   for (let i = 0; i < bpb + nbTemps; i++) clic(t0 + i * spb, i % bpb === 0);
-  const attendus = seg.idx.map(i => ({ i, tJeu: debut + (m.events[i].beat - seg.base) * spb, midi: m.events[i].midi }));
+  const attendus = seg.idx.filter(i => !m.events[i].liee).map(i => ({ i, tJeu: debut + (m.events[i].beat - seg.base) * spb, midi: m.events[i].midi }));
   attendus.forEach(a => a.t = a.tJeu + S.latence);
-  if (avecNotes) seg.idx.forEach(i => noteSynth(debut + (m.events[i].beat - seg.base) * spb, m.events[i].midi, m.events[i].dur * spb));
+  if (avecNotes) seg.idx.forEach(i => {
+    const e = m.events[i]; if (e.liee) return;
+    let d = e.dur; for (let j = i + 1; j < m.events.length && m.events[j].liee && seg.idx.includes(j); j++) d += m.events[j].dur;
+    noteSynth(debut + (e.beat - seg.base) * spb, e.midi, d * spb);
+  });
   S.passe = { mode, attendus, t0, debut, fin: debut + nbTemps * spb, spb, bpb, seg, bpm, temps: bpb + nbTemps };
   S.cartes.forEach((c, i) => { c.classList.remove('ok', 'faux', 'manque', 'courante'); c.classList.toggle('horsSeg', !seg.idx.includes(i)); });
   if (det) { det.flush(); det.evenements = []; }
