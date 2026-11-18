@@ -148,8 +148,8 @@ function trouverPortees(b, w, h, s, t) {
   for (let i = 0; i < L.length; i++) {
     if (pris.has(i)) continue;
     let meilleur = null;
-    for (let j = i + 1; j < L.length && L[j].y - L[i].y < 2.6 * s; j++) {
-      for (const div of [1, 2]) {             // L[j] = ligne suivante, ou celle d'après
+    for (let j = i + 1; j < L.length && L[j].y - L[i].y < 3.8 * s; j++) {
+      for (const div of [1, 2, 3]) {          // L[j] = ligne suivante, ou une plus loin (lignes manquantes)
         const m = (L[j].y - L[i].y) / div;
         if (m < 0.6 * s || m > 1.5 * s) continue;
         const idx = [i], ys = [L[i].y];
@@ -316,7 +316,7 @@ function analyser(G, opts = {}) {
     if (e0.s < 13 || e0.s > 26) k = 16 / e0.s;
     k = Math.min(k, Math.sqrt(9e6 / (w * h)));   // garde l'image sous ~9 Mpx
     if (Math.abs(k - 1) > 0.05) { G = redimensionner(G, k); w = G.w; h = G.h; }
-    debug.echelle = k;
+    debug.echelle = k; debug.interligneOrigine = e0.s;
   }
   // 1. binarisation provisoire, interligne, redressement
   let b = binariser(G, 25);
@@ -327,8 +327,9 @@ function analyser(G, opts = {}) {
   b = binariser(G, fen, 0.9);
   est = estimerInterligne(b, w, h);
   debug.angle = angle; debug.interligne = est.s;
-  // 2. portées
-  const portees = trouverPortees(b, w, h, est.s, est.t);
+  // 2. portées (binarisation plus sensible : les lignes fines deviennent gris clair sur les petites images)
+  const bLignes = debug.echelle > 1.3 ? binariser(G, fen, 0.95) : b;
+  const portees = trouverPortees(bLignes, w, h, est.s, est.t);
   if (!portees.length) return { erreur: 'Aucune portée trouvée. Essaie une image plus nette, bien droite, et cadrée sur la partition.', debug, G };
   // 3. suppression des lignes
   const B2 = supprimerLignes(b, w, h, portees);
@@ -520,9 +521,15 @@ function analyser(G, opts = {}) {
         if (c.h < 1.6 * s || c.h > 3.6 * s || c.w > 1.25 * s || c.w < 0.4 * s) break;
         const f = formeAlteration(b, w, c, P);
         c.forme = f;
-        if (f === 'becarre' || f === 'autre') break;
-        if (type && f !== type) break;
-        type = f; n++; fin = c.x1;
+        if (!type) {
+          if (f === 'autre') break;
+          // le 1er dièse est toujours sur Fa, le 1er bémol sur Si : la hauteur suffit, même sur une image floue
+          const pc = (P.bas - (c.y0 + c.y1) / 2) / (s / 2);
+          const seuilPos = P.cle === 'fa' ? 4.6 : 6.6;
+          type = pc > seuilPos ? 'diese' : 'bemol';
+          if (f === 'becarre' && P.s > 0 && debug.echelle <= 1.3) { type = null; break; }
+        }
+        n++; fin = c.x1;
       }
       P.armure = type === 'diese' ? n : type === 'bemol' ? -n : 0;
       P.debutMusique = fin + 0.3 * s;
@@ -642,6 +649,7 @@ function analyser(G, opts = {}) {
       let alter = alterArmure(st);
       if (e.alteration) { alter = e.alteration === 'diese' ? 1 : e.alteration === 'bemol' ? -1 : 0; accMes[d] = alter; }
       else if (accMes[d] !== undefined) alter = accMes[d];
+      e.d = d;
       e.midi = (oct + 1) * 12 + PC[STEPS.indexOf(st)] + alter;
       e.nom = NOMS_FR[st] + (alter === 1 ? '#' : alter === -1 ? 'b' : '') + oct;
       e.cle = cle;
@@ -651,6 +659,49 @@ function analyser(G, opts = {}) {
     if (mesure.evs.length) { mesures.push(mesure); mesure = { evs: [], duree: 0 }; }
   });
   if (mesure.evs.length) mesures.push(mesure);
+
+  // liaisons de prolongation : arc fin entre deux notes consécutives de même hauteur
+  const fins = new Map();
+  const estFin = id => {
+    if (fins.has(id)) return fins.get(id);
+    const c = comps[id - 1]; const ok = !avecTete.has(id) && c.h <= 1.25 * c.s0 && c.w >= 0.3 * c.s0 && c.n / (c.w * c.h) < 0.6;
+    fins.set(id, ok); return ok;
+  };
+  comps.forEach(c => { const P = porteeDe(c); c.s0 = P ? P.s : est.s; });
+  const couverture = (y, s, xa, xb, xmin, xmax) => {
+    xa = Math.round(xa); xb = Math.round(xb);
+    if (xb - xa < 2) return 0;
+    let meilleur = 0;
+    for (const sens of [-1, 1]) {
+      let n = 0;
+      for (let x = xa; x <= xb; x++) {
+        let vu = false;
+        for (let dy = 0.3 * s; dy <= 1.7 * s && !vu; dy += 1) {
+          const yy = Math.round(y + sens * dy); if (yy < 0 || yy >= h) continue;
+          const id = lab[yy * w + x];
+          if (id && estFin(id)) { const c = comps[id - 1]; if (c.x1 >= xmin && c.x0 <= xmax) vu = true; }
+        }
+        if (vu) n++;
+      }
+      meilleur = Math.max(meilleur, n / (xb - xa + 1));
+    }
+    return meilleur;
+  };
+  const toutes = mesures.flatMap(m => m.evs);
+  for (let i = 0; i + 1 < toutes.length; i++) {
+    const A = toutes[i], B = toutes[i + 1];
+    if (A.type !== 'note' || B.type !== 'note' || A.d !== B.d || A.cle !== B.cle) continue;
+    const s = A.P.s;
+    let liee = false;
+    if (A.P === B.P) {
+      liee = couverture(A.y, s, A.x + 0.7 * s, B.x - 0.7 * s, A.x - 0.9 * s, B.x + 0.9 * s) >= 0.55;
+    } else {
+      const fa = couverture(A.y, s, A.x + 0.7 * s, Math.min(A.x + 3 * s, A.P.droite), A.x - 0.9 * s, A.P.droite + s);
+      const fb = couverture(B.y, B.P.s, Math.max(B.P.debutMusique, B.x - 3 * B.P.s), B.x - 0.7 * B.P.s, B.P.gauche, B.x + 0.9 * B.P.s);
+      liee = fa >= 0.5 && fb >= 0.4;
+    }
+    if (liee) { A.lie = true; B.midi = A.midi; B.nom = A.nom; B.suiteLiee = true; }
+  }
 
   // mesure "normale" = durée la plus fréquente
   const freq = {}; mesures.forEach(m => { const k = Math.round(m.duree * 4) / 4; freq[k] = (freq[k] || 0) + 1; });
@@ -665,7 +716,7 @@ function analyser(G, opts = {}) {
     m.evs.forEach(e => {
       // un silence d'une ronde seul dans la mesure = pause de mesure entière
       const dur = e.type === 'silence' && e.dur === 4 && m.evs.length === 1 ? normale : e.dur;
-      tokens.push((e.type === 'silence' ? 'R' : e.nom) + '/' + codeDuree(dur));
+      tokens.push((e.type === 'silence' ? 'R' : e.nom) + '/' + codeDuree(dur) + (e.lie ? '~' : ''));
       evenements.push(e);
     });
   });
@@ -673,8 +724,8 @@ function analyser(G, opts = {}) {
   let derniere = null;
   const texte = tokens.map(tk => {
     if (tk === '|') return tk;
-    const [n, d] = tk.split('/');
-    if (d === derniere) return n;
+    const lie = tk.endsWith('~'), [n, d] = tk.replace('~', '').split('/');
+    if (d === derniere) return n + (lie ? '~' : '');
     derniere = d; return tk;
   }).join(' ');
 
@@ -713,6 +764,7 @@ function dessiner(cv, R, opts = {}) {
         const label = e.nom.replace(/\d+$/, '');
         const ly = e.P.bas + 2.4 * s + (opts.decaler ? 0 : 0);
         cx.fillStyle = m.douteuse ? '#b86e00' : '#1f6b40'; cx.fillText(label, e.x, ly);
+        if (e.lie) { cx.strokeStyle = '#2e8b57'; cx.beginPath(); cx.moveTo(e.x + 0.6 * s, e.P.bas + 1.6 * s); cx.lineTo(e.x + 1.6 * s, e.P.bas + 1.6 * s); cx.stroke(); cx.fillText('⌒', e.x + 1.1 * s, e.P.bas + 1.5 * s); }
       } else if (e.type === 'silence') {
         cx.strokeStyle = '#7b4fb5'; cx.lineWidth = Math.max(2, s * 0.12);
         cx.strokeRect(e.x - 0.6 * s, e.P.haut + 0.3 * s, 1.2 * s, 3.4 * s);

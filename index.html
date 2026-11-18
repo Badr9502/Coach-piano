@@ -108,7 +108,7 @@
       </label>
       <button id="omr-relire" disabled>↻ Relire avec ces réglages</button>
     </div>
-    <p id="omr-etat" class="petit">Le mieux : une capture d'écran d'une partition imprimée ou d'un PDF, bien droite, cadrée sur quelques lignes.
+    <p id="omr-etat" class="petit">Le mieux : une capture d'écran d'un PDF, <b>zoomée</b> pour que 2 ou 3 lignes de musique remplissent l'écran (pas la page entière).
       Tout est lu sur ton téléphone, l'image n'est envoyée nulle part.</p>
     <div id="omr-apercu" hidden>
       <canvas id="omr-canvas"></canvas>
@@ -133,6 +133,7 @@
       <code>Do4</code>, <code>Fa#4</code>, <code>Sib3</code> (ou <code>C4</code>, <code>F#4</code>, <code>Bb3</code>).
       Durées : <code>/1</code> ronde, <code>/2</code> blanche, <code>/4</code> noire, <code>/8</code> croche, <code>/16</code> double-croche,
       ajoute un point pour pointée (<code>/4.</code>). Silence : <code>R</code>. Barre de mesure : <code>|</code>.
+      Note liée à la suivante (tenue, pas rejouée) : ajoute <code>~</code>, par ex. <code>Sol4/2~ | Sol4/4</code>.
       La durée reste la même tant que tu ne la changes pas. Do4 = le Do du milieu du piano.</p>
     <p>Fichiers MusicXML (.musicxml, .xml ou .mxl compressé) : exportés depuis MuseScore, ou depuis une appli de scan de partition (PlayScore, ScanScore, Audiveris…).</p>
   </details>
@@ -228,8 +229,10 @@ function parseTexte(txt, beatsPerBar = 4) {
   const events = []; const errors = [];
   let beat = 0, dur = 1, bar = 1, barres = false;
   const barStarts = [0];
-  for (const raw of txt.split(/\s+/).filter(Boolean)) {
-    if (raw === '|') { barres = true; bar++; barStarts[bar - 1] = beat; continue; }
+  let lieeAvant = null; // note liée à la suivante (« ~ ») : la suivante ne se rejoue pas
+  for (const brut of txt.split(/\s+/).filter(Boolean)) {
+    if (brut === '|') { barres = true; bar++; barStarts[bar - 1] = beat; continue; }
+    const lie = brut.endsWith('~'), raw = lie ? brut.slice(0, -1) : brut;
     const [n, d] = raw.split('/');
     if (d !== undefined) {
       const dot = d.endsWith('.');
@@ -237,10 +240,13 @@ function parseTexte(txt, beatsPerBar = 4) {
       if (base === undefined) { errors.push(raw); continue; }
       dur = base * (dot ? 1.5 : 1);
     }
-    if (/^(r|x|-|silence)$/i.test(n)) { beat += dur; continue; }
+    if (/^(r|x|-|silence)$/i.test(n)) { beat += dur; lieeAvant = null; continue; }
     const midi = parseNom(n);
     if (midi == null) { errors.push(raw); continue; }
-    events.push({ midi, beat, dur, bar });
+    if (lieeAvant && lieeAvant.midi === midi) lieeAvant.dur += dur;
+    else events.push({ midi, beat, dur, bar });
+    if (lie) lieeAvant = lieeAvant && lieeAvant.midi === midi ? lieeAvant : events[events.length - 1];
+    else lieeAvant = null;
     beat += dur;
   }
   if (!barres) { // mesures automatiques
@@ -949,6 +955,8 @@ function lirePartition() {
       ` · clé de ${cles} · armure : ${arm}` +
       (R.piano ? ` · partition de piano : portée de la main ${$('main').value}` : '') +
       (R.accords ? ' · accords : seule la note ' + ($('main').value === 'gauche' ? 'grave' : 'aiguë') + ' est gardée' : '') + '.';
+    if (R.debug.interligneOrigine && R.debug.interligneOrigine < 10)
+      etat.textContent += ' ⚠️ La partition est très petite sur l\'image : zoome pour que 2 ou 3 lignes de musique remplissent l\'écran, puis refais la capture (une capture par groupe de lignes). La lecture sera bien plus juste.';
     S.fichierXML = null; $('fichier').value = '';
     S.tempsParMesure = R.tempsParMesure;
     $('texte').value = R.texte;
