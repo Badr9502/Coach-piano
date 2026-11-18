@@ -324,7 +324,8 @@ function analyser(G, opts = {}) {
   const angle = opts.redresser === false ? 0 : estimerAngle(b, w, h);
   if (Math.abs(angle) >= 0.2) { G = tourner(G, angle); }
   const fen = Math.max(21, Math.round(est.s * 3) | 1);
-  b = binariser(G, fen, 0.9);
+  // petites images agrandies : traits fins (hampes, lignes) devenus gris clair → seuil plus sensible
+  b = binariser(G, fen, debug.echelle > 1.3 ? 0.95 : 0.9);
   est = estimerInterligne(b, w, h);
   debug.angle = angle; debug.interligne = est.s;
   // 2. portées (binarisation plus sensible : les lignes fines deviennent gris clair sur les petites images)
@@ -344,6 +345,7 @@ function analyser(G, opts = {}) {
   const compDe = (x, y) => { x = Math.round(x); y = Math.round(y); if (x < 0 || y < 0 || x >= w || y >= h) return null; const id = lab[y * w + x]; return id ? comps[id - 1] : null; };
 
   debug.sonde = (x, y, s) => ({ coeur: remp(x - 0.5 * s, y - 0.28 * s, x + 0.5 * s, y + 0.28 * s), noir: noir(x, y), b: b[Math.round(y) * w + Math.round(x)] });
+  debug.B2 = B2; debug.w = w;
   // 4. systèmes : portées par paires si partition de piano
   let piano = opts.piano;
   if (piano === undefined || piano === 'auto') {
@@ -451,13 +453,29 @@ function analyser(G, opts = {}) {
   let T = [];
   tetes.forEach(t => { if (!T.some(o => o.P === t.P && Math.abs(o.x - t.x) < 0.8 * t.P.s && Math.abs(o.p - t.p) <= 1)) T.push(t); });
 
-  // 6. hampes
+  // 6. hampes (sur une image agrandie, les hampes fines deviennent gris très clair : binarisation dédiée)
+  const bH = debug.echelle > 1.3 ? binariser(G, fen, 0.985) : null;
+  const noirH = (x, y) => bH ? (x >= 0 && y >= 0 && x < w && y < h && (bH[(y | 0) * w + (x | 0)] === 1 || B2[(y | 0) * w + (x | 0)] === 1)) : noir(x, y);
+  const trouMax = bH ? 2 : 1;
   const longueurHampe = (xa, xb, y0, dir) => {
     let best = 0, col = -1;
     for (let x = Math.round(xa); x <= Math.round(xb); x++) {
       let y = Math.round(y0), n = 0, trou = 0;
+      const sL = est.s;
       while (y >= 0 && y < h) {
-        if (noir(x, y)) { n += 1 + trou; trou = 0; } else if (trou < 1) trou++; else break;
+        if (noirH(x, y)) { n += 1 + trou; trou = 0; }
+        else if (trou < trouMax) trou++;
+        else {
+          // coupure plus longue : la hampe reprend-elle un peu plus loin dans la même colonne ?
+          let saut = 0;
+          if (bH) for (let k = 1; k <= 0.6 * sL; k++) {
+            const yy = y + dir * k; let run = 0;
+            while (run < sL && noirH(x, yy + dir * run)) run++;
+            if (run >= 0.9 * sL) { saut = k; break; }
+          }
+          if (!saut) break;
+          n += trou + saut; trou = 0; y += dir * saut; continue;
+        }
         y += dir;
       }
       if (n > best) { best = n; col = x; }
@@ -544,7 +562,7 @@ function analyser(G, opts = {}) {
   portees.forEach(P => {
     const s = P.s, liste = parPortee.get(P).slice().sort((a, c) => a.x0 - c.x0);
     P.cle = null; P.armure = 0; P.debutMusique = P.gauche;
-    const debutCle = liste.filter(c => c.x0 >= P.gauche - 0.3 * s && c.x0 < P.gauche + 2.5 * s && c.w > 0.3 * s && c.h > 0.3 * s && c.y1 > P.haut - 2.5 * s && c.y0 < P.bas + 2.5 * s);
+    const debutCle = liste.filter(c => c.x0 >= P.gauche - 0.3 * s && c.x0 < P.gauche + 3.2 * s && c.w > 0.3 * s && c.h > 0.3 * s && c.y1 > P.haut - 2.5 * s && c.y0 < P.bas + 2.5 * s);
     let cle = null;
     if (debutCle.length) {
       cle = { x0: Math.min(...debutCle.map(c => c.x0)), x1: Math.max(...debutCle.map(c => c.x1)), y0: Math.min(...debutCle.map(c => c.y0)), y1: Math.max(...debutCle.map(c => c.y1)) };
@@ -576,7 +594,11 @@ function analyser(G, opts = {}) {
       P.debutMusique = fin + 0.3 * s;
       // chiffrage (deux chiffres empilés) juste après
       const chiffres = groupes.filter(c => c.x0 > fin && c.x0 - fin < 2.5 * s && c.w > 0.9 * s && c.w < 2.2 * s && c.h > 1.3 * s && c.h < 2.4 * s);
+      // sur une petite image, les deux chiffres se touchent : un seul bloc haut comme la portée
+      const bloc = groupes.find(c => c.x0 > fin && c.x0 - fin < 2.5 * s && c.w > 0.8 * s && c.w < 2.2 * s && c.h > 3.2 * s && c.h < 4.9 * s &&
+        c.y0 > P.haut - 0.6 * s && c.y1 < P.bas + 0.6 * s);
       if (chiffres.length >= 2) P.debutMusique = Math.max(...chiffres.map(c => c.x1)) + 0.3 * s;
+      else if (bloc) P.debutMusique = bloc.x1 + 0.3 * s;
     }
   });
   T = T.filter(t => t.x > t.P.debutMusique);
@@ -669,7 +691,8 @@ function analyser(G, opts = {}) {
     // une armure vue sur au moins 1/3 des portées l'emporte sur "pas d'armure" (souvent un raté)
     const cpt = {}; portees.forEach(P => cpt[P.armure] = (cpt[P.armure] || 0) + 1);
     const nonNulles = Object.keys(cpt).filter(k => +k !== 0).sort((a, c) => cpt[c] - cpt[a]);
-    armure = nonNulles.length && cpt[nonNulles[0]] >= portees.length / 3 ? +nonNulles[0] : 0;
+    armure = nonNulles.length && cpt[nonNulles[0]] >= Math.max(1, portees.length / 4) ? +nonNulles[0] : 0;
+    debug.armures = portees.map(P => P.armure);
   }
   const alterArmure = st => (armure > 0 && ORDRE_DIESES.slice(0, armure).includes(st)) ? 1 : (armure < 0 && ORDRE_BEMOLS.slice(0, -armure).includes(st)) ? -1 : 0;
 
@@ -745,7 +768,7 @@ function analyser(G, opts = {}) {
   }
 
   // triolets : 3 croches (ou noires, doubles) avec un « 3 » tout près → durée × 2/3
-  const estTrois = (c, s) => !avecTete.has(c.id) && !utilisees.has(c.id) && c.h >= 0.65 * s && c.h <= 1.9 * s && c.w >= 0.4 * s && c.w <= 1.4 * s && c.n / (c.w * c.h) < 0.65;
+  const estTrois = (c, s) => !avecTete.has(c.id) && !utilisees.has(c.id) && c.h >= 0.65 * s && c.h <= 1.9 * s && c.w >= 0.25 * s && c.w <= 1.4 * s && (c.n / (c.w * c.h) < 0.65 || c.w < 0.5 * s); // un « 3 » fin peut n'apparaître qu'en partie
   const marquerTriolets = (evs) => {
     const notes = evs.filter(e => e.type === 'note');
     for (let i = 0; i + 2 < notes.length; i++) {
@@ -786,6 +809,19 @@ function analyser(G, opts = {}) {
         t += m.evs[i].dur;
       }
       m.duree = m.evs.reduce((a, e) => a + e.dur, 0);
+    });
+  }
+
+  // silence mal identifié (soupir lu au lieu d'un demi-soupir / quart de soupir) : si la mesure est trop
+  // longue d'exactement la différence, on raccourcit le silence
+  {
+    const f1 = {}; mesures.forEach(m => { const k = Math.round(m.duree * 12) / 12; f1[k] = (f1[k] || 0) + 1; });
+    const norm1 = +Object.keys(f1).sort((a, c) => f1[c] - f1[a] || c - a)[0] || 4;
+    mesures.forEach(m => {
+      const exces = m.duree - norm1;
+      if (exces < 0.2) return;
+      const r = m.evs.find(e => e.type === 'silence' && e.dur === 1 && [0.25, 0.5].some(d => Math.abs(e.dur - d - exces) < 0.02));
+      if (r) { r.dur -= exces; m.duree -= exces; }
     });
   }
 
