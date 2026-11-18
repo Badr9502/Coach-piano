@@ -328,12 +328,15 @@ function analyser(G, opts = {}) {
   }
   // 0. mise à l'échelle : interligne visé ≈ 16 px (agrandit les petites captures, réduit les grosses photos)
   {
-    const b0 = binariser(G, 25), e0 = estimerInterligne(b0, w, h);
-    let k = 1;
-    if (e0.s < 13 || e0.s > 26) k = 16 / e0.s;
+    const G0 = G, b0 = binariser(G, 25), e0 = estimerInterligne(b0, w, h);
+    let k = 16 / e0.s;                              // toujours la même échelle de travail
     k = Math.min(k, Math.sqrt(9e6 / (w * h)));   // garde l'image sous ~9 Mpx
-    if (Math.abs(k - 1) > 0.05) { G = redimensionner(G, k); w = G.w; h = G.h; }
+    if (Math.abs(k - 1) > 0.03) { G = redimensionner(G, k); w = G.w; h = G.h; }
     debug.echelle = k; debug.interligneOrigine = e0.s;
+    // traits fins (hampes, lignes gris clair) : petite image, ou capture d'écran nette (fond blanc pur, pas une photo)
+    let blancPur = 0; for (let i = 0; i < G0.g.length; i += 7) if (G0.g[i] >= 250) blancPur++;
+    debug.propre = blancPur / (G0.g.length / 7) > 0.6;
+    debug.fin = e0.s < 15 || debug.propre;
   }
   // 1. binarisation provisoire, interligne, redressement
   let b = binariser(G, 25);
@@ -342,11 +345,11 @@ function analyser(G, opts = {}) {
   if (Math.abs(angle) >= 0.2) { G = tourner(G, angle); }
   const fen = Math.max(21, Math.round(est.s * 3) | 1);
   // petites images agrandies : traits fins (hampes, lignes) devenus gris clair → seuil plus sensible
-  b = binariser(G, fen, debug.echelle > 1.3 ? 0.95 : 0.9);
+  b = binariser(G, fen, debug.fin ? 0.95 : 0.9);
   est = estimerInterligne(b, w, h);
   debug.angle = angle; debug.interligne = est.s;
   // 2. portées (binarisation plus sensible : les lignes fines deviennent gris clair sur les petites images)
-  const bLignes = debug.echelle > 1.3 ? binariser(G, fen, 0.95) : b;
+  const bLignes = debug.fin ? binariser(G, fen, 0.95) : b;
   const portees = trouverPortees(bLignes, w, h, est.s, est.t);
   if (!portees.length) return { erreur: 'Aucune portée trouvée. Essaie une image plus nette, bien droite, et cadrée sur la partition.', debug, G };
   // 3. suppression des lignes
@@ -470,7 +473,7 @@ function analyser(G, opts = {}) {
   tetes.forEach(t => { if (!T.some(o => o.P === t.P && Math.abs(o.x - t.x) < 0.8 * t.P.s && Math.abs(o.p - t.p) <= 1)) T.push(t); });
 
   // 6. hampes (sur une image agrandie, les hampes fines deviennent gris très clair : binarisation dédiée)
-  const bH = debug.echelle > 1.3 ? binariser(G, fen, 0.985) : null;
+  const bH = debug.fin ? binariser(G, fen, 0.985) : null;
   const noirH = (x, y) => bH ? (x >= 0 && y >= 0 && x < w && y < h && (bH[(y | 0) * w + (x | 0)] === 1 || B2[(y | 0) * w + (x | 0)] === 1)) : noir(x, y);
   const trouMax = bH ? 2 : 1;
   const longueurHampe = (xa, xb, y0, dir) => {
@@ -507,6 +510,23 @@ function analyser(G, opts = {}) {
     else if (dn.len >= lmin) { t.hampe = { dir: 1, col: dn.col, bout: t.y + dn.len, len: dn.len }; }
   });
   debug.avantHampe = T.slice();
+  // une note loin au-dessus / au-dessous de la portée doit avoir une ligne supplémentaire entre elle et la portée
+  // (élimine p. ex. la petite note de l'indication de tempo « ♩ = 89 »)
+  const ligneSupp = (x, y, s) => {
+    for (let dy = -2; dy <= 2; dy++) {
+      const yy = Math.round(y + dy); if (yy < 0 || yy >= h) continue;
+      let run = 0, best = 0;
+      for (let xx = Math.round(x - 1.1 * s); xx <= Math.round(x + 1.1 * s); xx++) { if (xx >= 0 && xx < w && b[yy * w + xx]) { run++; best = Math.max(best, run); } else run = 0; }
+      if (best >= 1.1 * s) return true;
+    }
+    return false;
+  };
+  T = T.filter(t => {
+    const s = t.P.s;
+    if (t.p >= 10) return ligneSupp(t.x, t.P.haut - s, s);
+    if (t.p <= -2) return ligneSupp(t.x, t.P.bas + s, s);
+    return true;
+  });
   // une "tête pleine" sans hampe est suspecte (souvent un bout de symbole)
   T = T.filter(t => !t.plein || t.hampe);
 
@@ -591,7 +611,7 @@ function analyser(G, opts = {}) {
       const groupes = grouper(liste.filter(c => c.x0 > cle.x1 - 0.2 * s), s);
       for (const c of groupes) {
         P.dbgArmure.push(c);
-        if (c.w < 0.65 * s && c.h < 1.6 * s) continue; // points de la clé de fa, poussières
+        if (c.w < 0.65 * s && c.h < 1.6 * s) { fin = Math.max(fin, c.x1); continue; } // points de la clé de fa, poussières
         if (c.x0 - fin > 1.8 * s) break;
         if (c.h < 1.6 * s || c.h > 3.6 * s || c.w > 1.25 * s || c.w < 0.4 * s) break;
         const f = formeAlteration(b, w, c, P);
@@ -640,7 +660,8 @@ function analyser(G, opts = {}) {
   T.forEach(t => {
     const s = t.P.s; t.alteration = null;
     const proches = parPortee.get(t.P).filter(c => !avecTete.has(c.id) && c.x1 < t.x - 0.45 * s && c.x1 > t.x - 2.6 * s && c.y1 > t.y - 2.5 * s && c.y0 < t.y + 2.5 * s);
-    const cands = grouper(proches, s).filter(g => g.x1 > t.x - 2.4 * s && g.h > 1.8 * s && g.h < 3.6 * s && g.w > 0.35 * s && g.w < 1.3 * s && g.y0 < t.y && g.y1 > t.y);
+    const cands = grouper(proches, s).filter(g => g.x1 > t.x - 2.4 * s && g.h > 1.8 * s && g.h < 3.6 * s && g.w > 0.35 * s && g.w < 1.3 * s && g.y0 < t.y && g.y1 > t.y &&
+      Math.abs((g.y0 + g.y1) / 2 - t.y) < 1.1 * s);   // une altération est centrée sur sa note (le bémol un peu plus haut)
     if (!cands.length) return;
     const g = cands.sort((a, d) => d.x1 - a.x1)[0];
     let f = formeAlteration(b, w, g, t.P);
@@ -711,8 +732,17 @@ function analyser(G, opts = {}) {
     // vote majoritaire sur les portées retenues
     // une armure vue sur au moins 1/3 des portées l'emporte sur "pas d'armure" (souvent un raté)
     const cpt = {}; portees.forEach(P => cpt[P.armure] = (cpt[P.armure] || 0) + 1);
-    const nonNulles = Object.keys(cpt).filter(k => +k !== 0).sort((a, c) => cpt[c] - cpt[a]);
-    armure = nonNulles.length && cpt[nonNulles[0]] >= Math.max(1, portees.length / 4) ? +nonNulles[0] : 0;
+    // on rate souvent une altération de l'armure, on en ajoute rarement une : type majoritaire (♯ ou ♭),
+    // puis le plus grand nombre vu pour ce type
+    const vals = portees.map(P => P.armure).filter(a => a);
+    const nD = vals.filter(a => a > 0).length, nB = vals.filter(a => a < 0).length;
+    if (!vals.length || Math.max(nD, nB) < Math.max(1, portees.length / 4)) armure = 0;
+    else {
+      const memeType = vals.filter(a => (nD >= nB ? a > 0 : a < 0)).map(Math.abs).sort((a, c) => c - a);
+      const vu2 = memeType.find((v, i) => memeType.indexOf(v) !== i);       // plus grand nombre vu au moins 2 fois
+      const n = vu2 !== undefined ? vu2 : memeType[memeType.length >> 1];
+      armure = nD >= nB ? n : -n;
+    }
     debug.armures = portees.map(P => P.armure);
   }
   const alterArmure = st => (armure > 0 && ORDRE_DIESES.slice(0, armure).includes(st)) ? 1 : (armure < 0 && ORDRE_BEMOLS.slice(0, -armure).includes(st)) ? -1 : 0;
@@ -843,6 +873,22 @@ function analyser(G, opts = {}) {
       if (exces < 0.2) return;
       const r = m.evs.find(e => e.type === 'silence' && e.dur === 1 && [0.25, 0.5].some(d => Math.abs(e.dur - d - exces) < 0.02));
       if (r) { r.dur -= exces; m.duree -= exces; }
+    });
+  }
+
+  // point oublié : mesure trop courte d'exactement une double-croche, avec « croche + double » → croche pointée
+  {
+    const f2 = {}; mesures.forEach(m => { const k = Math.round(m.duree * 12) / 12; f2[k] = (f2[k] || 0) + 1; });
+    const norm2 = +Object.keys(f2).sort((a, c) => f2[c] - f2[a] || c - a)[0] || 4;
+    mesures.forEach((m, mi) => {
+      const manque = norm2 - m.duree;
+      if (mi === 0 || mi === mesures.length - 1 || manque < 0.2) return;
+      for (let i = 0; i + 1 < m.evs.length; i++) {
+        const e = m.evs[i], suiv = m.evs[i + 1];
+        if (e.type === 'note' && !e.triolet && Math.abs(e.dur - 2 * manque) < 0.01 && Math.abs(suiv.dur - manque) < 0.01) {
+          e.dur *= 1.5; m.duree += manque; break;
+        }
+      }
     });
   }
 
