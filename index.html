@@ -37,6 +37,10 @@
   code { background: #f0ebe3; padding: 1px 5px; border-radius: 4px; }
   .msg { color: var(--faux); min-height: 1em; margin: 6px 0 0; font-size: .9rem; }
   .petit { font-size: .85rem; color: var(--doux); }
+  .photo-bloc { background: #f4f7fb; border: 1px dashed #b9cde6; border-radius: 12px; padding: 12px 14px; margin-bottom: 8px; }
+  .bouton-photo { display: inline-block; background: var(--accent); color: #fff; padding: 10px 16px; border-radius: 10px; font-size: 1rem; cursor: pointer; font-weight: 600; }
+  #omr-canvas { width: 100%; height: auto; border: 1px solid var(--bord); border-radius: 8px; margin-top: 8px; background: #fff; }
+  #omr-etat.erreur { color: var(--faux); }
   details.aide { font-size: .88rem; color: var(--doux); margin-top: 6px; }
   .resume { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
   .stat { background: #faf8f4; border: 1px solid var(--bord); border-radius: 10px; padding: 10px 12px; }
@@ -91,6 +95,27 @@
 
 <section class="carte">
   <h2>1. Le morceau</h2>
+  <div class="photo-bloc">
+    <label class="bouton-photo">📷 Photo ou capture d'écran de la partition
+      <input type="file" id="photo" accept="image/*" hidden>
+    </label>
+    <div class="row">
+      <label>Clé
+        <select id="omr-cle"><option value="auto">auto</option><option value="sol">sol</option><option value="fa">fa</option></select>
+      </label>
+      <label>Armure
+        <select id="omr-armure"></select>
+      </label>
+      <button id="omr-relire" disabled>↻ Relire avec ces réglages</button>
+    </div>
+    <p id="omr-etat" class="petit">Le mieux : une capture d'écran d'une partition imprimée ou d'un PDF, bien droite, cadrée sur quelques lignes.
+      Tout est lu sur ton téléphone, l'image n'est envoyée nulle part.</p>
+    <div id="omr-apercu" hidden>
+      <canvas id="omr-canvas"></canvas>
+      <p class="petit">🟢 notes lues · 🟠 mesure dont la durée ne tombe pas juste (à vérifier) · 🟣 silences · traits rouges = barres de mesure.
+        Corrige le texte ci-dessous si besoin, puis clique « Analyser ».</p>
+    </div>
+  </div>
   <div class="row">
     <label>Exemple
       <select id="preset"></select>
@@ -172,6 +197,7 @@
 
 </main>
 
+<script src="omr.js"></script>
 <script>
 'use strict';
 // =====================================================================
@@ -533,7 +559,7 @@ function analyser() {
   $('msg-morceau').textContent = '';
   S.main = $('main').value; S.cible = Math.max(30, Math.min(240, +$('cible').value || 100));
   try {
-    S.morceau = S.fichierXML ? parseMusicXML(S.fichierXML, S.main) : parseTexte($('texte').value);
+    S.morceau = S.fichierXML ? parseMusicXML(S.fichierXML, S.main) : parseTexte($('texte').value, S.tempsParMesure || 4);
   } catch (e) { $('msg-morceau').textContent = e.message; return; }
   const m = S.morceau;
   if (m.errors.length) $('msg-morceau').textContent = 'Non compris (ignoré) : ' + m.errors.join(' ');
@@ -821,7 +847,7 @@ function arreter(manuel = true) {
 
 // ---------- Branchements ----------
 function chargerPreset(i) {
-  const p = PRESETS[i]; S.fichierXML = null; $('fichier').value = '';
+  const p = PRESETS[i]; S.fichierXML = null; $('fichier').value = ''; S.omrImage = null; S.tempsParMesure = 4; $('omr-apercu').hidden = true; $('omr-relire').disabled = true;
   $('texte').value = p.texte; $('main').value = p.main; $('cible').value = p.cible;
   analyser();
 }
@@ -868,12 +894,80 @@ $('fichier').onchange = async e => {
       return;
     }
     S.fichierXML = estZip ? await lireMXL(buf) : new TextDecoder().decode(b);
+    S.omrImage = null; $('omr-apercu').hidden = true; $('omr-relire').disabled = true;
     const t = parseMusicXML(S.fichierXML, $('main').value);
     if (t.tempo) $('cible').value = t.tempo;
     $('texte').value = '(chargé depuis ' + f.name + ')';
   } catch (err) { $('msg-morceau').textContent = 'Impossible de lire ce fichier : ' + err.message; S.fichierXML = null; return; }
   analyser();
 };
+// ---------- Lecture d'une photo / capture de partition ----------
+(() => {
+  const sel = $('omr-armure');
+  sel.add(new Option('auto', 'auto'));
+  sel.add(new Option('aucune', '0'));
+  for (let n = 1; n <= 7; n++) sel.add(new Option(n + ' ♯', String(n)));
+  for (let n = 1; n <= 7; n++) sel.add(new Option(n + ' ♭', String(-n)));
+})();
+
+async function chargerImage(fichier) {
+  const url = URL.createObjectURL(fichier);
+  try {
+    const img = new Image(); img.src = url; await img.decode();
+    // on limite la taille (les photos de téléphone font souvent 12 Mpx)
+    const k = Math.min(1, 2400 / Math.max(img.naturalWidth, img.naturalHeight));
+    const cv = document.createElement('canvas');
+    cv.width = Math.round(img.naturalWidth * k); cv.height = Math.round(img.naturalHeight * k);
+    const cx = cv.getContext('2d');
+    cx.fillStyle = '#fff'; cx.fillRect(0, 0, cv.width, cv.height);
+    cx.drawImage(img, 0, 0, cv.width, cv.height);
+    return OMR.versGris(cx.getImageData(0, 0, cv.width, cv.height));
+  } finally { URL.revokeObjectURL(url); }
+}
+
+function lirePartition() {
+  if (!S.omrImage) return;
+  const etat = $('omr-etat'); etat.classList.remove('erreur');
+  etat.textContent = '⏳ Lecture de la partition…';
+  setTimeout(() => {
+    let R;
+    try { R = OMR.analyser(S.omrImage, { main: $('main').value, cle: $('omr-cle').value, armure: $('omr-armure').value }); }
+    catch (e) { R = { erreur: 'Erreur pendant la lecture : ' + e.message }; }
+    if (R.erreur || !R.nbNotes) {
+      etat.classList.add('erreur');
+      etat.textContent = R.erreur || 'Aucune note reconnue. Essaie une image plus nette, bien droite, cadrée sur la partition.';
+      if (R.G) { OMR.dessiner($('omr-canvas'), R); $('omr-apercu').hidden = false; }
+      return;
+    }
+    OMR.dessiner($('omr-canvas'), R);
+    $('omr-apercu').hidden = false;
+    $('omr-relire').disabled = false;
+    const arm = R.armure > 0 ? R.armure + ' ♯' : R.armure < 0 ? (-R.armure) + ' ♭' : 'aucune';
+    const cles = [...new Set(R.choix.map(P => P.cle || '?'))].join('/');
+    etat.textContent = `✅ ${R.nbNotes} notes lues · ${R.mesures.length} mesures` +
+      (R.nbDouteuses ? ` (${R.nbDouteuses} à vérifier)` : '') +
+      ` · clé de ${cles} · armure : ${arm}` +
+      (R.piano ? ` · partition de piano : portée de la main ${$('main').value}` : '') +
+      (R.accords ? ' · accords : seule la note ' + ($('main').value === 'gauche' ? 'grave' : 'aiguë') + ' est gardée' : '') + '.';
+    S.fichierXML = null; $('fichier').value = '';
+    S.tempsParMesure = R.tempsParMesure;
+    $('texte').value = R.texte;
+    analyser();
+  }, 30);
+}
+
+$('photo').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  $('omr-etat').classList.remove('erreur');
+  $('omr-etat').textContent = '⏳ Chargement de l\'image…';
+  try { S.omrImage = await chargerImage(f); }
+  catch (err) { $('omr-etat').classList.add('erreur'); $('omr-etat').textContent = 'Image illisible : ' + err.message; return; }
+  $('omr-cle').value = 'auto'; $('omr-armure').value = 'auto';
+  lirePartition();
+};
+$('omr-relire').onclick = lirePartition;
+$('main').addEventListener('change', () => { if (S.omrImage && !S.fichierXML) lirePartition(); });
+
 $('btn-analyser').onclick = analyser;
 $('moins').onclick = () => setBpm(S.bpm - 2);
 $('plus').onclick = () => setBpm(S.bpm + 2);
