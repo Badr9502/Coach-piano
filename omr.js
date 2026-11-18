@@ -182,13 +182,16 @@ function trouverPortees(b, w, h, s, t) {
   }
   // étendue horizontale : colonnes où ≥4 des 5 lignes sont noires
   portees.forEach(P => {
-    let g = -1, d = -1;
+    // plus longue étendue continue où ≥4 des 5 lignes sont noires (trous < 1,5 interligne tolérés),
+    // pour ignorer un trait vertical isolé (bord de page, cadre de l'appli…)
     const noirA = (x, y) => { const yy = Math.round(y); return b[yy * w + x] || b[Math.max(0, yy - 1) * w + x] || b[Math.min(h - 1, yy + 1) * w + x]; };
-    for (let x = 0; x < w; x++) {
-      let n = 0; for (const y of P.lignes) n += noirA(x, y) ? 1 : 0;
-      if (n >= 4) { if (g < 0) g = x; d = x; }
+    let meilleur = [-1, -1], deb = -1, der = -1;
+    for (let x = 0; x <= w; x++) {
+      let n = 0; if (x < w) for (const y of P.lignes) n += noirA(x, y) ? 1 : 0;
+      if (n >= 4) { if (deb < 0 || x - der > 5 * P.s) { deb = x; } der = x; }
+      if (deb >= 0 && der - deb > meilleur[1] - meilleur[0]) meilleur = [deb, der];
     }
-    P.gauche = g; P.droite = d;
+    P.gauche = meilleur[0]; P.droite = meilleur[1];
   });
   return portees.filter(P => P.droite - P.gauche > 10 * P.s);
 }
@@ -309,6 +312,20 @@ function grouper(liste, s) {
 function analyser(G, opts = {}) {
   const debug = { etapes: [] };
   let { w, h } = G;
+  // marges sombres (page affichée sur fond noir, bandes de l'appli) : on les blanchit
+  {
+    const g = G.g.slice(), sombreCol = x => { let n = 0; for (let y = 0; y < h; y += 2) if (g[y * w + x] < 90) n++; return n > 0.85 * (h / 2); };
+    const sombreRang = y => { let n = 0; for (let x = 0; x < w; x += 2) if (g[y * w + x] < 90) n++; return n > 0.85 * (w / 2); };
+    let x0 = 0; while (x0 < w / 3 && sombreCol(x0)) x0++;
+    let x1 = w - 1; while (x1 > 2 * w / 3 && sombreCol(x1)) x1--;
+    let y0 = 0; while (y0 < h / 3 && sombreRang(y0)) y0++;
+    let y1 = h - 1; while (y1 > 2 * h / 3 && sombreRang(y1)) y1--;
+    if (x0 > 0 || x1 < w - 1 || y0 > 0 || y1 < h - 1) {
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (x < x0 || x > x1 || y < y0 || y > y1) g[y * w + x] = 255;
+      G = { w, h, g };
+      debug.marges = { x0, x1, y0, y1 };
+    }
+  }
   // 0. mise à l'échelle : interligne visé ≈ 16 px (agrandit les petites captures, réduit les grosses photos)
   {
     const b0 = binariser(G, 25), e0 = estimerInterligne(b0, w, h);
