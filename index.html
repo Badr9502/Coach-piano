@@ -95,8 +95,8 @@
     <label>Exemple
       <select id="preset"></select>
     </label>
-    <label>…ou un fichier MusicXML
-      <input type="file" id="fichier" accept=".xml,.musicxml">
+    <label>…ou un fichier MusicXML (.musicxml, .xml, .mxl)
+      <input type="file" id="fichier">
     </label>
   </div>
   <label class="bloc">Notes
@@ -109,7 +109,7 @@
       Durées : <code>/1</code> ronde, <code>/2</code> blanche, <code>/4</code> noire, <code>/8</code> croche, <code>/16</code> double-croche,
       ajoute un point pour pointée (<code>/4.</code>). Silence : <code>R</code>. Barre de mesure : <code>|</code>.
       La durée reste la même tant que tu ne la changes pas. Do4 = le Do du milieu du piano.</p>
-    <p>Fichiers MusicXML (.musicxml / .xml non compressé) : exportés depuis MuseScore, ou depuis une appli de scan de partition (PlayScore, ScanScore, Audiveris…).</p>
+    <p>Fichiers MusicXML (.musicxml, .xml ou .mxl compressé) : exportés depuis MuseScore, ou depuis une appli de scan de partition (PlayScore, ScanScore, Audiveris…).</p>
   </details>
   <div class="row">
     <label>Main
@@ -828,15 +828,50 @@ function chargerPreset(i) {
 PRESETS.forEach((p, i) => $('preset').add(new Option(p.nom, i)));
 $('preset').onchange = e => chargerPreset(+e.target.value);
 $('texte').oninput = () => { S.fichierXML = null; $('fichier').value = ''; };
+// Lecture d'un .mxl (zip) sans bibliothèque externe
+async function lireMXL(buf) {
+  const dv = new DataView(buf), u8 = new Uint8Array(buf), dec = new TextDecoder();
+  let eocd = -1;
+  for (let i = buf.byteLength - 22; i >= Math.max(0, buf.byteLength - 65557); i--) if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  if (eocd < 0) throw new Error('Fichier .mxl invalide.');
+  const fichiers = {}; let p = dv.getUint32(eocd + 16, true);
+  for (let k = 0, n = dv.getUint16(eocd + 10, true); k < n; k++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) break;
+    const lNom = dv.getUint16(p + 28, true), lExtra = dv.getUint16(p + 30, true), lCom = dv.getUint16(p + 32, true);
+    fichiers[dec.decode(u8.subarray(p + 46, p + 46 + lNom))] = { methode: dv.getUint16(p + 10, true), taille: dv.getUint32(p + 20, true), off: dv.getUint32(p + 42, true) };
+    p += 46 + lNom + lExtra + lCom;
+  }
+  const lire = async nom => {
+    const f = fichiers[nom]; if (!f) throw new Error('Partition introuvable dans le .mxl.');
+    const debut = f.off + 30 + dv.getUint16(f.off + 26, true) + dv.getUint16(f.off + 28, true);
+    const data = u8.subarray(debut, debut + f.taille);
+    if (f.methode === 0) return dec.decode(data);
+    return new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text();
+  };
+  let principal = null;
+  if (fichiers['META-INF/container.xml']) {
+    const c = new DOMParser().parseFromString(await lire('META-INF/container.xml'), 'application/xml');
+    const r = c.getElementsByTagName('rootfile')[0]; if (r) principal = r.getAttribute('full-path');
+  }
+  if (!principal) principal = Object.keys(fichiers).find(n => !n.startsWith('META-INF') && /\.(xml|musicxml)$/i.test(n));
+  return lire(principal);
+}
+
 $('fichier').onchange = async e => {
   const f = e.target.files[0]; if (!f) return;
-  if (/\.mxl$/i.test(f.name)) { $('msg-morceau').textContent = 'Fichier .mxl compressé : exporte plutôt en .musicxml non compressé.'; return; }
-  S.fichierXML = await f.text();
+  $('msg-morceau').textContent = '';
   try {
+    const buf = await f.arrayBuffer(); const b = new Uint8Array(buf);
+    const estZip = b[0] === 0x50 && b[1] === 0x4b; // "PK"
+    if (!estZip && !/\.(xml|musicxml)$/i.test(f.name) && !new TextDecoder().decode(b.subarray(0, 400)).includes('score-')) {
+      $('msg-morceau').textContent = 'Ce fichier n\'est pas une partition MusicXML (.musicxml, .xml ou .mxl). Les images et PDF ne sont pas encore lus directement.';
+      return;
+    }
+    S.fichierXML = estZip ? await lireMXL(buf) : new TextDecoder().decode(b);
     const t = parseMusicXML(S.fichierXML, $('main').value);
     if (t.tempo) $('cible').value = t.tempo;
     $('texte').value = '(chargé depuis ' + f.name + ')';
-  } catch (_) {}
+  } catch (err) { $('msg-morceau').textContent = 'Impossible de lire ce fichier : ' + err.message; S.fichierXML = null; return; }
   analyser();
 };
 $('btn-analyser').onclick = analyser;
@@ -850,7 +885,7 @@ $('btn-calib').onclick = calibrer;
 chargerPreset(0);
 
 // Accès pour les tests
-window.__coach = { parseTexte, parseMusicXML, doigter, analyserTempo, Detecteur, yin, evaluer, decider, nomNote };
+window.__coach = { lireMXL, parseTexte, parseMusicXML, doigter, analyserTempo, Detecteur, yin, evaluer, decider, nomNote };
 </script>
 </body>
 </html>
