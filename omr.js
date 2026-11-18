@@ -345,7 +345,6 @@ function analyser(G, opts = {}) {
   const compDe = (x, y) => { x = Math.round(x); y = Math.round(y); if (x < 0 || y < 0 || x >= w || y >= h) return null; const id = lab[y * w + x]; return id ? comps[id - 1] : null; };
 
   debug.sonde = (x, y, s) => ({ coeur: remp(x - 0.5 * s, y - 0.28 * s, x + 0.5 * s, y + 0.28 * s), noir: noir(x, y), b: b[Math.round(y) * w + Math.round(x)] });
-  debug.B2 = B2; debug.w = w;
   // 4. systèmes : portées par paires si partition de piano
   let piano = opts.piano;
   if (piano === undefined || piano === 'auto') {
