@@ -405,6 +405,47 @@ function analyser(G, opts = {}) {
     }
   });
   debug.brutes = tetes.slice();
+  // têtes vides par les "trous" : petites zones blanches entièrement entourées de noir
+  {
+    const lab4 = new Int32Array(w * h), pile = new Int32Array(w * h); let nl = 0;
+    const smax = Math.max(...portees.map(P => P.s));
+    for (let i0 = 0; i0 < w * h; i0++) {
+      if (B2[i0] || lab4[i0]) continue;
+      nl++; let sp = 0; pile[sp++] = i0; lab4[i0] = nl;
+      let n = 0, sx = 0, sy = 0, bord = false, x0 = w, x1 = 0, y0 = h, y1 = 0;
+      while (sp) {
+        const j = pile[--sp], x = j % w, y = (j / w) | 0;
+        n++; sx += x; sy += y; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+        if (x === 0 || y === 0 || x === w - 1 || y === h - 1) bord = true;
+        if (n > smax * smax) { bord = true; }
+        const voisins = [j - 1, j + 1, j - w, j + w];
+        for (let q = 0; q < 4; q++) {
+          const k = voisins[q];
+          if (k < 0 || k >= w * h || (q < 2 && ((k / w) | 0) !== y)) continue;
+          if (!B2[k] && !lab4[k]) { lab4[k] = nl; pile[sp++] = k; }
+        }
+      }
+      if (bord || n < 3) continue;
+      const cx = sx / n, cy = sy / n;
+      // portée la plus proche
+      let P = null, dmin = Infinity;
+      portees.forEach(Q => { const d = cy < Q.haut ? Q.haut - cy : cy > Q.bas ? cy - Q.bas : 0; if (d < dmin && cx > Q.gauche && cx < Q.droite + Q.s) { dmin = d; P = Q; } });
+      if (!P || dmin > 4 * P.s) continue;
+      const sP = P.s;
+      if (x1 - x0 + 1 > 1.0 * sP || y1 - y0 + 1 > 0.75 * sP || n > 0.45 * sP * sP || n < 0.05 * sP * sP) continue;
+      const pp = Math.round((P.bas - cy) / (sP / 2)), yp = P.bas - pp * sP / 2;
+      if (Math.abs(cy - yp) > 0.35 * sP) continue;
+      // anneau : largeur extérieure sur la rangée du centre
+      const r = Math.round(cy);
+      let g = Math.round(cx); while (g > 0 && !B2[r * w + g]) g--; let ge = g; while (ge > 0 && B2[r * w + ge]) ge--;
+      let d = Math.round(cx); while (d < w - 1 && !B2[r * w + d]) d++; let de = d; while (de < w - 1 && B2[r * w + de]) de++;
+      const ext = de - ge - 1;
+      if (ext < 0.95 * sP || ext > 2.2 * sP) continue;
+      if (g - ge < 1 || de - d < 1) continue;
+      // pas une ligature / masse : au-dessus et en dessous du trou, l'anneau est fin
+      tetes.push({ x: Math.round(cx), y: yp, p: pp, plein: false, score: 1.3, P, parTrou: true });
+    }
+  }
   // suppression entre positions voisines
   tetes.sort((a, c) => c.score - a.score);
   let T = [];
@@ -703,15 +744,62 @@ function analyser(G, opts = {}) {
     if (liee) { A.lie = true; B.midi = A.midi; B.nom = A.nom; B.suiteLiee = true; }
   }
 
+  // triolets : 3 croches (ou noires, doubles) avec un « 3 » tout près → durée × 2/3
+  const estTrois = (c, s) => !avecTete.has(c.id) && !utilisees.has(c.id) && c.h >= 0.65 * s && c.h <= 1.9 * s && c.w >= 0.4 * s && c.w <= 1.4 * s && c.n / (c.w * c.h) < 0.65;
+  const marquerTriolets = (evs) => {
+    const notes = evs.filter(e => e.type === 'note');
+    for (let i = 0; i + 2 < notes.length; i++) {
+      const [A, B, C] = [notes[i], notes[i + 1], notes[i + 2]];
+      if (A.triolet || B.triolet || C.triolet || A.P !== C.P) continue;
+      if (!(A.dur === B.dur && B.dur === C.dur && [0.25, 0.5, 1].includes(A.dur))) continue;
+      const s = A.P.s, ys = [A, B, C].flatMap(e => [e.y, e.tete.hampe ? e.tete.hampe.bout : e.y]);
+      const yMin = Math.min(...ys) - 2.6 * s, yMax = Math.max(...ys) + 2.6 * s;
+      const trouve = parPortee.get(A.P).concat(comps.filter(c => c.y1 < A.P.haut - 2 * s || c.y0 > A.P.bas + 2 * s)).some(c => {
+        if (!estTrois(c, s)) return false;
+        const xc = (c.x0 + c.x1) / 2, yc = (c.y0 + c.y1) / 2;
+        return xc > A.x - 0.4 * s && xc < C.x + 1.2 * s && Math.abs(xc - B.x) < 1.6 * s + (C.x - A.x) / 3 && yc > yMin && yc < yMax &&
+          !(yc > Math.min(A.y, B.y, C.y) - 0.6 * s && yc < Math.max(A.y, B.y, C.y) + 0.6 * s); // pas au niveau des têtes
+      });
+      if (trouve) { [A, B, C].forEach(e => { e.dur = e.dur * 2 / 3; e.triolet = true; }); i += 2; }
+    }
+  };
+  mesures.forEach(m => {
+    marquerTriolets(m.evs);
+    m.duree = m.evs.reduce((a, e) => a + e.dur, 0);
+  });
+  // « simile » : le 3 n'est imprimé qu'au début ; si une mesure est trop longue d'exactement ce que
+  // des triolets expliqueraient, on transforme les groupes de 3 croches qui commencent sur un temps
+  {
+    const f0 = {}; mesures.forEach(m => { const k = Math.round(m.duree * 12) / 12; f0[k] = (f0[k] || 0) + 1; });
+    const norm0 = +Object.keys(f0).sort((a, c) => f0[c] - f0[a] || c - a)[0] || 4;
+    const yADesTriolets = mesures.some(m => m.evs.some(e => e.triolet));
+    mesures.forEach(m => {
+      let exces = m.duree - norm0;
+      if (exces < 0.4 || !yADesTriolets && exces % 0.5 > 0.01) return;
+      let t = 0;
+      for (let i = 0; i + 2 < m.evs.length && exces > 0.4; i++) {
+        const [A, B, C] = m.evs.slice(i, i + 3);
+        const surTemps = Math.abs(t - Math.round(t)) < 0.01;
+        if (surTemps && [A, B, C].every(e => e.type === 'note' && !e.triolet && e.dur === 0.5)) {
+          [A, B, C].forEach(e => { e.dur = 1 / 3; e.triolet = true; }); exces -= 0.5; t += 1; i += 2; continue;
+        }
+        t += m.evs[i].dur;
+      }
+      m.duree = m.evs.reduce((a, e) => a + e.dur, 0);
+    });
+  }
+
   // mesure "normale" = durée la plus fréquente
-  const freq = {}; mesures.forEach(m => { const k = Math.round(m.duree * 4) / 4; freq[k] = (freq[k] || 0) + 1; });
+  const freq = {}; mesures.forEach(m => { const k = Math.round(m.duree * 12) / 12; freq[k] = (freq[k] || 0) + 1; });
   const normale = +Object.keys(freq).sort((a, c) => freq[c] - freq[a] || c - a)[0] || 4;
   const codeDuree = d => {
-    const t = { 4: '1', 3: '2.', 2: '2', 1.5: '4.', 1: '4', 0.75: '8.', 0.5: '8', 0.375: '16.', 0.25: '16', 0.125: '32' };
-    return t[d] || '4';
+    const t = [[4, '1'], [3, '2.'], [2, '2'], [1.5, '4.'], [1, '4'], [0.75, '8.'], [0.5, '8'], [0.375, '16.'], [0.25, '16'], [0.125, '32'],
+      [4 / 3, '2t'], [2 / 3, '4t'], [1 / 3, '8t'], [1 / 6, '16t']];
+    const m = t.find(([v]) => Math.abs(v - d) < 0.01);
+    return m ? m[1] : '4';
   };
   mesures.forEach((m, i) => {
-    m.douteuse = Math.abs(m.duree - normale) > 0.01 && !(i === 0 && m.duree < normale) && !(i === mesures.length - 1 && m.duree < normale);
+    m.douteuse = Math.abs(m.duree - normale) > 0.02 && !(i === 0 && m.duree < normale) && !(i === mesures.length - 1 && m.duree < normale);
     if (i) tokens.push('|');
     m.evs.forEach(e => {
       // un silence d'une ronde seul dans la mesure = pause de mesure entière
