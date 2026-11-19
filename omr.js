@@ -866,7 +866,9 @@ function analyser(G, opts = {}) {
   // silence mal identifié (soupir lu au lieu d'un demi-soupir / quart de soupir) : si la mesure est trop
   // longue d'exactement la différence, on raccourcit le silence
   {
-    const f1 = {}; mesures.forEach(m => { const k = Math.round(m.duree * 12) / 12; f1[k] = (f1[k] || 0) + 1; });
+    // durée de référence : mesures sans silence si possible (un silence mal lu fausse la durée)
+    const sansSil = mesures.filter((m, i) => i > 0 && i < mesures.length - 1 && !m.evs.some(e => e.type === 'silence'));
+    const f1 = {}; (sansSil.length >= 2 ? sansSil : mesures).forEach(m => { const k = Math.round(m.duree * 12) / 12; f1[k] = (f1[k] || 0) + 1; });
     const norm1 = +Object.keys(f1).sort((a, c) => f1[c] - f1[a] || c - a)[0] || 4;
     mesures.forEach(m => {
       const exces = m.duree - norm1;
