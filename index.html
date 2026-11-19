@@ -120,6 +120,8 @@
   .note .duree { display: block; font-size: .64rem; color: var(--pale); }
   .note.noire-touche { background: #12141a; border-color: #2b303c; }
   .note.liee { opacity: .5; border: 1px dashed var(--ligne); }
+  .note.ornement { min-width: 40px; transform: scale(.86); border: 1px dotted var(--or); margin: 0 -3px; }
+  .note.ornement .nom { font-size: .76rem; }
   .note.liee .duree::before { content: "⌒ "; }
   .note.courante { transform: translateY(-3px) scale(1.1); border-color: var(--or); box-shadow: 0 0 0 3px rgba(243,185,77,.25); }
   .note.ok { background: rgba(60,207,142,.16); border-color: var(--ok); }
@@ -229,7 +231,7 @@
 <header class="appbar">
   <div class="logo"><svg class="i" style="width:22px;height:22px"><use href="#i-note"/></svg></div>
   <h1>Coach Piano</h1>
-  <span class="version">version 13</span>
+  <span class="version">version 14</span>
 </header>
 
 <main>
@@ -257,7 +259,7 @@
         <textarea id="texte" rows="4" spellcheck="false"></textarea>
         <p class="petit">Une note = nom + octave, puis <code>/durée</code> si elle change : <code>Do4</code>, <code>Fa#4</code>, <code>Sib3</code>.
           Durées : <code>/1</code> ronde, <code>/2</code> blanche, <code>/4</code> noire, <code>/8</code> croche, <code>/16</code> double,
-          point = pointée (<code>/4.</code>), <code>t</code> = triolet (<code>/8t</code>). Silence <code>R</code>, barre de mesure <code>|</code>,
+          point = pointée (<code>/4.</code>), <code>t</code> = triolet (<code>/8t</code>), <code>/g</code> = petite note d'ornement jouée juste avant la suivante (<code>Ré5/g Mi5/g Ré5/8</code>). Silence <code>R</code>, barre de mesure <code>|</code>,
           note tenue vers la suivante <code>~</code>. Do4 = Do du milieu du piano.</p>
       </div>
     </details>
@@ -385,7 +387,7 @@
   <button class="tab" data-vue="pratique" disabled><svg><use href="#i-metro"/></svg>Pratique</button>
 </nav>
 
-<script src="omr.js?v=13"></script>
+<script src="omr.js?v=14"></script>
 <script>
 'use strict';
 // =====================================================================
@@ -419,10 +421,20 @@ function parseTexte(txt, beatsPerBar = 4) {
   let beat = 0, dur = 1, bar = 1, barres = false;
   const barStarts = [0];
   let lieeAvant = null; // note liée à la suivante (« ~ ») : la suivante ne se rejoue pas
+  let ornAttente = [];  // petites notes d'ornement (« /g ») en attente de leur note principale
+  const placerOrnements = () => {
+    if (!ornAttente.length) return;
+    const k = ornAttente.length, prev = events[events.length - 1];
+    let g = 0.125; // 1/8 de temps par petite note, prise sur la note précédente : la note principale reste sur le temps
+    if (prev && !prev.grace && prev.beat + prev.dur >= beat - 1e-6) { g = Math.min(g, prev.dur * 0.5 / k); if (prev.durEcrite === undefined) prev.durEcrite = prev.dur; prev.dur -= g * k; }
+    ornAttente.forEach((m, i) => events.push({ midi: m, beat: Math.max(0, beat - (k - i) * g), dur: g, bar, grace: true }));
+    ornAttente = [];
+  };
   for (const brut of txt.split(/\s+/).filter(Boolean)) {
     if (brut === '|') { barres = true; bar++; barStarts[bar - 1] = beat; continue; }
     const lie = brut.endsWith('~'), raw = lie ? brut.slice(0, -1) : brut;
     const [n, d] = raw.split('/');
+    if (d === 'g' || d === 'G') { const m = parseNom(n); if (m == null) errors.push(raw); else ornAttente.push(m); continue; }
     if (d !== undefined) {
       const tri = /t$/i.test(d), d2 = tri ? d.slice(0, -1) : d;   // « 8t » = croche de triolet
       const dot = d2.endsWith('.');
@@ -430,9 +442,10 @@ function parseTexte(txt, beatsPerBar = 4) {
       if (base === undefined) { errors.push(raw); continue; }
       dur = base * (dot ? 1.5 : 1) * (tri ? 2 / 3 : 1);
     }
-    if (/^(r|x|-|silence)$/i.test(n)) { beat += dur; lieeAvant = null; continue; }
+    if (/^(r|x|-|silence)$/i.test(n)) { ornAttente = []; beat += dur; lieeAvant = null; continue; }
     const midi = parseNom(n);
     if (midi == null) { errors.push(raw); continue; }
+    placerOrnements();
     // note liée à la précédente : carte à part (dans sa mesure), mais ni rejouée ni attendue
     events.push({ midi, beat, dur, bar, liee: !!(lieeAvant && lieeAvant.midi === midi) });
     lieeAvant = lie ? events[events.length - 1] : null;
@@ -577,7 +590,7 @@ function doigter(events, main) {
 // =====================================================================
 function analyserTempo(events, cible, niveau) {
   const iois = [];
-  const attaques = events.filter(e => !e.liee);
+  const attaques = events.filter(e => !e.liee && !e.grace);
   for (let i = 1; i < attaques.length; i++) { const d = attaques[i].beat - attaques[i - 1].beat; if (d > 1e-6) iois.push(d); }
   const ioiMin = iois.length ? Math.min(...iois) : 1;
   const notesSec = cible / 60 / ioiMin;
@@ -861,9 +874,9 @@ function afficherAnalyse() {
       mesureEl.innerHTML = `<span class="num">${e.bar}</span>`; part.appendChild(mesureEl);
     }
     const c = document.createElement('div');
-    c.className = 'note' + (estNoire(e.midi) ? ' noire-touche' : '') + (e.liee ? ' liee' : '');
+    c.className = 'note' + (estNoire(e.midi) ? ' noire-touche' : '') + (e.liee ? ' liee' : '') + (e.grace ? ' ornement' : '');
     c.dataset.doigt = e.doigt;
-    c.innerHTML = `<span class="doigt">${e.doigt}</span><span class="nom">${nomNote(e.midi)}</span><span class="duree">${nomDuree(e.dur)}</span>`;
+    c.innerHTML = `<span class="doigt">${e.doigt}</span><span class="nom">${nomNote(e.midi)}</span><span class="duree">${e.grace ? 'ornement' : nomDuree(e.durEcrite ?? e.dur)}</span>`;
     c.title = `Mesure ${e.bar} — ${nomNote(e.midi)}, doigt ${e.doigt}`;
     mesureEl.appendChild(c); S.cartes[i] = c;
   });
@@ -879,7 +892,7 @@ function segment() {
   const base = m.barStarts[de - 1];
   const finB = a < nb ? m.barStarts[a] : m.totalBeats;
   const idx = []; m.events.forEach((e, i) => { if (e.bar >= de && e.bar <= a) idx.push(i); });
-  const att = idx.filter(i => !m.events[i].liee);
+  const att = idx.filter(i => !m.events[i].liee && !m.events[i].grace);
   const iois = []; for (let k = 1; k < att.length; k++) iois.push(m.events[att[k]].beat - m.events[att[k - 1]].beat);
   return { de, a, base, finB, idx, ioiMin: iois.length ? Math.min(...iois.filter(x => x > 0)) : 1 };
 }

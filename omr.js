@@ -522,8 +522,6 @@ function analyser(G, opts = {}) {
     else if (dn.len >= lmin) { t.hampe = { dir: 1, col: dn.col, bout: t.y + dn.len, len: dn.len }; }
   });
   debug.avantHampe = T.slice();
-  // petite note d'ornement (appoggiature) ou bout de ligature : « noire » à hampe très courte → ignorée
-  T = T.filter(t => !(t.plein && t.hampe && (t.traits || 0) === 0 && t.hampe.len < 2.5 * t.P.s));
   // une note loin au-dessus / au-dessous de la portée doit avoir une ligne supplémentaire entre elle et la portée
   // (élimine p. ex. la petite note de l'indication de tempo « ♩ = 89 »)
   const ligneSupp = (x, y, s) => {
@@ -604,6 +602,9 @@ function analyser(G, opts = {}) {
     }
     T = T.filter(t => !fausses.has(t));
   }
+
+  // petite note d'ornement (appoggiature) ou bout de ligature : « noire » à hampe très courte → ignorée
+  T = T.filter(t => !(t.plein && t.hampe && (t.traits || 0) === 0 && t.hampe.len < 2.5 * t.P.s));
 
   // 8. points de prolongation
   T.forEach(t => {
@@ -742,12 +743,79 @@ function analyser(G, opts = {}) {
     t.alteration = f; g.ids.forEach(id => utilisees.add(id));
   });
 
+  // 11 bis. petites notes d'ornement (appoggiatures) : petites têtes pleines avec une hampe verticale à côté
+  // (cherchées directement dans l'image : sur une image floue, l'ornement est souvent en plusieurs morceaux)
+  const ornements = [];
+  const compsOrnement = new Set();
+  const sombre = (x, y) => x >= 0 && y >= 0 && x < w && y < h && (bAbs[(y | 0) * w + (x | 0)] === 1 || B2[(y | 0) * w + (x | 0)] === 1);
+  // longueur d'une hampe FINE et droite partant de la tête (le zigzag épais d'un soupir ne compte pas)
+  const hampeDepuis = (xa, xb, y0, dir, s) => {
+    let best = 0;
+    for (let x = Math.round(xa); x <= Math.round(xb); x++) {
+      let y = Math.round(y0), n = 0, trou = 0, epais = false;
+      while (y > 0 && y < h - 1 && n < 4 * s) {
+        if (sombre(x, y)) {
+          let l = x, r = x; while (l > x - s && sombre(l - 1, y)) l--; while (r < x + s && sombre(r + 1, y)) r++;
+          if (n > 0.6 * s && r - l + 1 > 0.32 * s) { epais = true; break; } // trait épais : ligature/crochet (fin de hampe) ou zigzag
+          n += 1 + trou; trou = 0;
+        } else if (++trou > 2) break;
+        y += dir;
+      }
+      // hampe complète, ou plus courte mais terminée par une petite ligature / un crochet
+      const valeur = n >= 1.4 * s ? n : (epais && n >= 0.7 * s ? 1.4 * s : n);
+      best = Math.max(best, valeur);
+    }
+    return best;
+  };
+  portees.forEach(P => {
+    const s = P.s, cands = [];
+    for (let pp = -7; pp <= 15; pp++) {
+      const y = P.bas - pp * s / 2, yr = Math.round(y);
+      if (yr < 1 || yr >= h - 1) continue;
+      for (let x = Math.round(P.debutMusique); x <= Math.min(w - 2, P.droite); x++) {
+        const id = lab[yr * w + x];
+        if (!id || avecTete.has(id) || utilisees.has(id)) continue;
+        if (T.some(t => t.P === P && Math.abs(t.x - x) < 1.0 * s && Math.abs(t.y - y) < 1.0 * s)) continue;
+        const f = remp(x - 0.27 * s, y - 0.14 * s, x + 0.27 * s, y + 0.14 * s);
+        if (f < 0.82) continue;
+        let ya = yr, yb = yr; while (ya > 0 && noir(x, ya - 1)) ya--; while (yb < h - 1 && noir(x, yb + 1)) yb++;
+        let xa = x, xb = x; while (xa > 0 && noir(xa - 1, yr)) xa--; while (xb < w - 1 && noir(xb + 1, yr)) xb++;
+        const vh = (yb - ya + 1) / s, hw = (xb - xa + 1) / s;
+        if (vh < 0.35 || vh > 0.85 || hw < 0.45 || hw > 1.15) continue;
+        // centre de la petite tête et hampe juste à côté (à droite vers le haut, ou à gauche vers le bas)
+        const xc = (xa + xb) / 2, demi = (xb - xa + 1) / 2;
+        const up = hampeDepuis(xc + demi - 0.25 * s, xc + demi + 0.15 * s, y - 0.1 * s, -1, s);
+        const dn = hampeDepuis(xc - demi - 0.15 * s, xc - demi + 0.25 * s, y + 0.1 * s, +1, s);
+        if (Math.max(up, dn) < 1.4 * s) continue;
+        // quart de soupir : deux petites boules empilées (un interligne d'écart) sur le même trait
+        const boule = (xx, yy) => remp(xx - 0.2 * s, yy - 0.12 * s, xx + 0.2 * s, yy + 0.12 * s) > 0.8;
+        let empilee = false;
+        for (let dx = -0.5 * s; dx <= 0.5 * s && !empilee; dx += 1) if (boule(xc + dx, y - s) || boule(xc + dx, y + s)) empilee = true;
+        if (empilee) continue;
+        // silence (quart de soupir, demi-soupir…) : trait OBLIQUE, aucune colonne droite un peu longue → pas un ornement
+        const c = comps[id - 1];
+        if (c.h >= 1.6 * s && c.h <= 3.6 * s && c.w <= 1.6 * s) {
+          let droite = 0;
+          for (let xx = c.x0; xx <= c.x1; xx++) { let run = 0; for (let yy = c.y0; yy <= c.y1; yy++) { if (lab[yy * w + xx] === id) { run++; droite = Math.max(droite, run); } else run = 0; } }
+          if (droite < 1.1 * s) continue;
+        }
+        // un ornement précède toujours une note principale, tout près à droite
+        if (!T.some(t => t.P === P && t.x > xc + 0.5 * s && t.x < xc + 3.8 * s)) continue;
+        cands.push({ x: xc, y, p: pp, f, id });
+      }
+    }
+    cands.sort((a, d) => d.f - a.f);
+    const gardees = [];
+    cands.forEach(q => { if (!gardees.some(o => Math.abs(o.x - q.x) < 0.5 * s && Math.abs(o.p - q.p) <= 1)) gardees.push(q); });
+    if (!globalThis.SANS_ORN) gardees.forEach(q => { ornements.push({ x: q.x, y: q.y, p: q.p, P }); compsOrnement.add(q.id); });
+  });
+
   // 12. silences
   const silences = [];
   portees.forEach(P => {
     const s = P.s;
     parPortee.get(P).forEach(c => {
-      if (avecTete.has(c.id) || utilisees.has(c.id) || c.x0 < P.debutMusique) return;
+      if (avecTete.has(c.id) || utilisees.has(c.id) || compsOrnement.has(c.id) || c.x0 < P.debutMusique) return;
       if (c.y0 < P.haut - 0.8 * s || c.y1 > P.bas + 0.8 * s) return;
       const rx = c.w / s, ry = c.h / s, yc = (c.y0 + c.y1) / 2, fill = c.n / (c.w * c.h);
       let dur = null;
@@ -788,6 +856,7 @@ function analyser(G, opts = {}) {
       ev.push({ type: 'note', x: n.x, y: n.y, p: n.p, dur, tete: n, accord: !!g.accord, alteration: n.alteration, P });
     });
     silences.filter(r => r.P === P).forEach(r => ev.push({ type: 'silence', x: r.x, y: r.y, dur: r.dur, P }));
+    ornements.filter(o => o.P === P).forEach(o => ev.push({ type: 'note', grace: true, x: o.x, y: o.y, p: o.p, dur: 0, P }));
     barres.get(P).forEach(x => ev.push({ type: 'barre', x, P }));
     ev.sort((a, c) => a.x - c.x);
     return ev;
@@ -833,7 +902,8 @@ function analyser(G, opts = {}) {
       if (e.type === 'silence') { mesure.evs.push(e); mesure.duree += e.dur; return; }
       const d = base + e.p, st = STEPS[((d % 7) + 7) % 7], oct = Math.floor(d / 7);
       let alter = alterArmure(st);
-      if (e.alteration) { alter = e.alteration === 'diese' ? 1 : e.alteration === 'bemol' ? -1 : 0; accMes[d] = alter; }
+      if (e.grace) { if (accMes[d] !== undefined) alter = accMes[d]; }
+      else if (e.alteration) { alter = e.alteration === 'diese' ? 1 : e.alteration === 'bemol' ? -1 : 0; accMes[d] = alter; }
       else if (accMes[d] !== undefined) alter = accMes[d];
       e.d = d;
       e.midi = (oct + 1) * 12 + PC[STEPS.indexOf(st)] + alter;
@@ -876,7 +946,7 @@ function analyser(G, opts = {}) {
   const toutes = mesures.flatMap(m => m.evs);
   for (let i = 0; i + 1 < toutes.length; i++) {
     const A = toutes[i], B = toutes[i + 1];
-    if (A.type !== 'note' || B.type !== 'note' || A.d !== B.d || A.cle !== B.cle) continue;
+    if (A.type !== 'note' || B.type !== 'note' || A.grace || B.grace || A.d !== B.d || A.cle !== B.cle) continue;
     const s = A.P.s;
     let liee = false;
     if (A.P === B.P) {
@@ -892,7 +962,7 @@ function analyser(G, opts = {}) {
   // triolets : 3 croches (ou noires, doubles) avec un « 3 » tout près → durée × 2/3
   const estTrois = (c, s) => !avecTete.has(c.id) && !utilisees.has(c.id) && c.h >= 0.65 * s && c.h <= 1.9 * s && c.w >= 0.25 * s && c.w <= 1.4 * s && (c.n / (c.w * c.h) < 0.65 || c.w < 0.5 * s); // un « 3 » fin peut n'apparaître qu'en partie
   const marquerTriolets = (evs) => {
-    const notes = evs.filter(e => e.type === 'note');
+    const notes = evs.filter(e => e.type === 'note' && !e.grace);
     for (let i = 0; i + 2 < notes.length; i++) {
       const [A, B, C] = [notes[i], notes[i + 1], notes[i + 2]];
       if (A.triolet || B.triolet || C.triolet || A.P !== C.P) continue;
@@ -925,7 +995,7 @@ function analyser(G, opts = {}) {
       for (let i = 0; i + 2 < m.evs.length && exces > 0.4; i++) {
         const [A, B, C] = m.evs.slice(i, i + 3);
         const surTemps = Math.abs(t - Math.round(t)) < 0.01;
-        if (surTemps && [A, B, C].every(e => e.type === 'note' && !e.triolet && e.dur === 0.5)) {
+        if (surTemps && [A, B, C].every(e => e.type === 'note' && !e.grace && !e.triolet && e.dur === 0.5)) {
           [A, B, C].forEach(e => { e.dur = 1 / 3; e.triolet = true; }); exces -= 0.5; t += 1; i += 2; continue;
         }
         t += m.evs[i].dur;
@@ -959,7 +1029,7 @@ function analyser(G, opts = {}) {
       if (mi === 0 || mi === mesures.length - 1 || manque < 0.2) return;
       for (let i = 0; i + 1 < m.evs.length; i++) {
         const e = m.evs[i], suiv = m.evs[i + 1];
-        if (e.type === 'note' && !e.triolet && Math.abs(e.dur - 2 * manque) < 0.01 && Math.abs(suiv.dur - manque) < 0.01) {
+        if (e.type === 'note' && !e.grace && !e.triolet && Math.abs(e.dur - 2 * manque) < 0.01 && Math.abs(suiv.dur - manque) < 0.01) {
           e.dur *= 1.5; m.duree += manque; break;
         }
       }
@@ -981,7 +1051,7 @@ function analyser(G, opts = {}) {
     m.evs.forEach(e => {
       // un silence d'une ronde seul dans la mesure = pause de mesure entière
       const dur = e.type === 'silence' && e.dur === 4 && m.evs.length === 1 ? normale : e.dur;
-      tokens.push((e.type === 'silence' ? 'R' : e.nom) + '/' + codeDuree(dur) + (e.lie ? '~' : ''));
+      tokens.push(e.grace ? e.nom + '/g' : (e.type === 'silence' ? 'R' : e.nom) + '/' + codeDuree(dur) + (e.lie ? '~' : ''));
       evenements.push(e);
     });
   });
@@ -990,6 +1060,7 @@ function analyser(G, opts = {}) {
   const texte = tokens.map(tk => {
     if (tk === '|') return tk;
     const lie = tk.endsWith('~'), [n, d] = tk.replace('~', '').split('/');
+    if (d === 'g') return tk;
     if (d === derniere) return n + (lie ? '~' : '');
     derniere = d; return tk;
   }).join(' ');
@@ -1025,7 +1096,8 @@ function dessiner(cv, R, opts = {}) {
       const s = e.P.s;
       if (e.type === 'note') {
         cx.strokeStyle = m.douteuse ? '#e8a33d' : '#2e8b57'; cx.lineWidth = Math.max(2, s * 0.15);
-        cx.beginPath(); cx.ellipse(e.x, e.y, 0.75 * s, 0.6 * s, 0, 0, 2 * Math.PI); cx.stroke();
+        const k = e.grace ? 0.55 : 1;
+        cx.beginPath(); cx.ellipse(e.x, e.y, 0.75 * s * k, 0.6 * s * k, 0, 0, 2 * Math.PI); cx.stroke();
         const label = e.nom.replace(/\d+$/, '');
         const ly = e.P.bas + 2.4 * s + (opts.decaler ? 0 : 0);
         cx.fillStyle = m.douteuse ? '#b86e00' : '#1f6b40'; cx.fillText(label, e.x, ly);
