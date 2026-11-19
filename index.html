@@ -192,6 +192,11 @@
   th { color: var(--pale); font-weight: 600; font-size: .72rem; text-transform: uppercase; letter-spacing: .6px; }
   tr:last-child td { border-bottom: none; }
 
+  .calib { margin-top: 14px; padding: 16px; border-radius: 16px; background: var(--fond2); border: 1px solid rgba(243,185,77,.35); animation: entre .25s ease-out; }
+  .calib > b { display: block; margin-bottom: 4px; }
+  .calib button { margin-top: 10px; }
+  .calib .petit { margin: 6px 2px 0; }
+
   /* ---------- onglets du bas ---------- */
   .onglets { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 30;
     display: flex; gap: 4px; padding: 6px; border-radius: 22px; width: min(440px, calc(100% - 24px));
@@ -224,7 +229,7 @@
 <header class="appbar">
   <div class="logo"><svg class="i" style="width:22px;height:22px"><use href="#i-note"/></svg></div>
   <h1>Coach Piano</h1>
-  <span class="version">version 8</span>
+  <span class="version">version 9</span>
 </header>
 
 <main>
@@ -336,6 +341,15 @@
       <button id="btn-stop" disabled><svg><use href="#i-stop"/></svg>Stop</button>
       <button id="btn-calib"><svg><use href="#i-calib"/></svg>Calibrer</button>
     </div>
+    <div id="calib-choix" class="calib" hidden>
+      <b>Calibrer le micro</b>
+      <p class="petit">Mesure le décalage entre ce que ton téléphone joue et ce qu'il entend, pour juger ton rythme au plus juste. Une fois suffit, dans une pièce calme.</p>
+      <button id="calib-auto" class="primaire large"><svg class="i"><use href="#i-son"/></svg> Automatique : rien à jouer</button>
+      <p class="petit">Le téléphone émet 8 bips et s'écoute lui-même (sans écouteurs). Le plus précis.</p>
+      <button id="calib-flash" class="large"><svg class="i"><use href="#i-calib"/></svg> En jouant sur le flash (sans son)</button>
+      <p class="petit">Le cercle clignote 8 fois : joue toujours la même note (par ex. un Do) à chaque flash.</p>
+      <p class="petit" id="calib-actuel"></p>
+    </div>
     <div class="micro"><svg class="i"><use href="#i-micro"/></svg><div class="vu"><div id="vu-barre"></div></div><span id="note-live">—</span></div>
     <span id="etat"></span>
   </div>
@@ -371,7 +385,7 @@
   <button class="tab" data-vue="pratique" disabled><svg><use href="#i-metro"/></svg>Pratique</button>
 </nav>
 
-<script src="omr.js?v=8"></script>
+<script src="omr.js?v=9"></script>
 <script>
 'use strict';
 // =====================================================================
@@ -915,7 +929,7 @@ function animer() {
       const aff = $('bpm-aff'); aff.classList.add('flash'); aff.classList.toggle('accent', temps % p.bpb === 0);
       setTimeout(() => aff.classList.remove('flash', 'accent'), 90);
     }
-    $('compte').textContent = now < p.debut ? (p.mode === 'calib' ? 'Prépare-toi… ' : 'Décompte : ') + (p.bpb - Math.max(0, temps)) : (p.mode === 'calib' ? 'Joue une note sur chaque clic' : p.mode === 'ecoute' ? 'Écoute…' : 'Joue !');
+    $('compte').textContent = p.mode === 'calib-auto' ? 'Silence… je m\'écoute' : now < p.debut ? (p.mode === 'calib' ? 'Prépare-toi… ' : 'Décompte : ') + (p.bpb - Math.max(0, temps)) : (p.mode === 'calib' ? 'Joue une note à chaque flash' : p.mode === 'ecoute' ? 'Écoute…' : 'Joue !');
     let k = -1; p.attendus.forEach((a, j) => { if (a.tJeu <= now + 0.02) k = j; });
     if (k !== courante) {
       if (courante >= 0 && S.cartes[p.attendus[courante].i]) S.cartes[p.attendus[courante].i].classList.remove('courante');
@@ -939,7 +953,8 @@ async function jouer() {
 function finJeu() {
   const p = S.passe; det.flush();
   const tmin = p.debut - p.spb * 0.75 + S.latence, tmax = p.fin + 0.3 + S.latence;
-  const detectes = det.evenements.filter(e => e.t >= tmin && e.t <= tmax);
+  // seuls les sons avec une vraie hauteur comptent (les bruits, clics, voix… sont ignorés)
+  const detectes = det.evenements.filter(e => e.t >= tmin && e.t <= tmax && e.midi != null);
   const r = evaluer(p.attendus, detectes);
   arreter(false);
   r.res.forEach((x, k) => { const c = S.cartes[p.attendus[k].i]; c.classList.add(x.statut); });
@@ -999,30 +1014,76 @@ async function ecouter() {
   S.timer = setTimeout(() => arreter(false), (S.passe.fin - ctx.currentTime + 0.4) * 1000);
 }
 
-async function calibrer() {
+// Latence robuste au bruit : on cherche le décalage « c » retrouvé sur le plus grand nombre de bips/flashs
+// (un bruit isolé ne se répète pas au même décalage), puis la médiane des mesures proches de c.
+function estimerLatence(instants, evenements, accepte, tol = 0.03, fen = [-0.2, 0.5]) {
+  const ev = evenements.filter(accepte);
+  const cands = instants.map(t => ev.map(e => e.t - t).filter(d => d >= fen[0] && d <= fen[1]));
+  const tous = cands.flat();
+  if (!tous.length) return { ok: false, n: 0 };
+  let c = 0, nMax = -1;
+  tous.forEach(x => { const n = cands.filter(l => l.some(d => Math.abs(d - x) <= tol)).length; if (n > nMax) { nMax = n; c = x; } });
+  const choisis = cands.map(l => l.filter(d => Math.abs(d - c) <= tol).sort((a, b) => Math.abs(a - c) - Math.abs(b - c))[0]).filter(d => d !== undefined);
+  if (choisis.length < Math.min(5, instants.length)) return { ok: false, n: choisis.length };
+  choisis.sort((a, b) => a - b);
+  const lat = choisis[choisis.length >> 1];
+  const ecartMs = 1000 * Math.sqrt(choisis.reduce((a, d) => a + (d - lat) ** 2, 0) / choisis.length);
+  return { ok: true, latence: lat, n: choisis.length, ecartMs };
+}
+
+// En jouant : on garde la note (classe de hauteur) qui revient sur le plus de flashs, puis estimation robuste
+function estimerLatenceJeu(instants, evenements) {
+  let meilleur = { ok: false, n: 0 };
+  for (let pc = 0; pc < 12; pc++) {
+    const R = estimerLatence(instants, evenements, e => e.midi != null && mod12(e.midi) === pc, 0.06, [-0.3, 0.5]);
+    if (R.n > meilleur.n || (R.n === meilleur.n && R.ok && R.ecartMs < meilleur.ecartMs)) meilleur = R;
+  }
+  return meilleur;
+}
+
+function bip(t) { // bip court et net à 880 Hz (La5), facile à reconnaître même dans le bruit
+  const o = new OscillatorNode(ctx, { frequency: 880 }), g = new GainNode(ctx, { gain: 0 });
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.6, t + 0.004); g.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
+  o.connect(g).connect(ctx.destination); o.start(t); o.stop(t + 0.2); S.programmes.push(o);
+}
+
+function finCalibration(res, mode) {
+  arreter(false);
+  if (res.ok) {
+    S.latence = res.latence; localStorage.setItem('coach-latence', S.latence);
+    $('etat').textContent = `✅ Calibration réussie : décalage de ${Math.round(S.latence * 1000)} ms (${res.n}/8 mesures cohérentes, ±${Math.round(res.ecartMs)} ms).`;
+  } else if (mode === 'auto') {
+    $('etat').textContent = `Je n'ai pas bien entendu les bips (${res.n}/8). Enlève les écouteurs, monte le volume et recommence au calme — ou utilise la calibration en jouant sur le flash.`;
+  } else {
+    $('etat').textContent = `Calibration ratée (${res.n}/8 notes régulières). Joue une note nette et bien sur chaque flash, près du micro, et recommence.`;
+  }
+  afficherLatence();
+}
+
+async function calibrer(mode) {
   try { await preparerAudio(); await preparerMicro(); }
   catch (e) { $('etat').textContent = 'Micro inaccessible : ' + e.message; return; }
-  const spb = 60 / 80, t0 = ctx.currentTime + 0.4, n = 8, pre = 4;
-  for (let i = 0; i < pre + n; i++) clic(t0 + i * spb, i % 4 === 0);
-  const attendus = Array.from({ length: n }, (_, i) => ({ i: -1, tJeu: t0 + (pre + i) * spb }));
-  S.passe = { mode: 'calib', attendus, t0, debut: t0 + pre * spb, fin: t0 + (pre + n) * spb, spb, bpb: 4, temps: pre + n };
+  $('calib-choix').hidden = true;
+  const n = 8, pre = mode === 'auto' ? 1 : 4, spb = mode === 'auto' ? 0.6 : 60 / 70;
+  const t0 = ctx.currentTime + 0.5;
+  const instants = Array.from({ length: n }, (_, i) => t0 + (pre + i) * spb);
+  if (mode === 'auto') instants.forEach(bip);
+  S.passe = { mode: mode === 'auto' ? 'calib-auto' : 'calib', attendus: [], t0, debut: t0 + pre * spb, fin: t0 + (pre + n) * spb, spb, bpb: mode === 'auto' ? 1 : 4, temps: pre + n };
   det.flush(); det.evenements = [];
   etatBoutons(true); animer();
-  $('etat').textContent = 'Calibration : joue une note (n\'importe laquelle) pile sur chacun des 8 clics après le décompte.';
+  $('etat').textContent = mode === 'auto' ? 'Calibration automatique : silence pendant les 8 bips…' : 'Après le décompte, joue toujours la même note (par ex. un Do) à chaque flash du cercle.';
   S.timer = setTimeout(() => {
     det.flush();
-    const decal = [];
-    attendus.forEach(a => {
-      let best = null; det.evenements.forEach(e => { const dt = e.t - a.tJeu; if (Math.abs(dt) < 0.3 && (best == null || Math.abs(dt) < Math.abs(best))) best = dt; });
-      if (best != null) decal.push(best);
-    });
-    arreter(false);
-    if (decal.length >= 5) {
-      decal.sort((x, y) => x - y); S.latence = decal[Math.floor(decal.length / 2)];
-      localStorage.setItem('coach-latence', S.latence);
-      $('etat').textContent = `Calibration OK : décalage micro/haut-parleur = ${Math.round(S.latence * 1000)} ms.`;
-    } else $('etat').textContent = `Calibration ratée (${decal.length}/8 notes entendues). Rapproche-toi du micro et recommence.`;
-  }, (S.passe.fin - ctx.currentTime + 0.5) * 1000);
+    const res = mode === 'auto'
+      ? estimerLatence(instants, det.evenements, e => e.midi != null && mod12(e.midi - 81) === 0, 0.025)
+      : estimerLatenceJeu(instants, det.evenements);
+    finCalibration(res, mode);
+  }, (S.passe.fin - ctx.currentTime + 0.7) * 1000);
+}
+
+function afficherLatence() {
+  const v = parseFloat(localStorage.getItem('coach-latence'));
+  $('calib-actuel').textContent = isNaN(v) ? 'Pas encore calibré.' : `Réglage actuel : ${Math.round(v * 1000)} ms.`;
 }
 
 function arreter(manuel = true) {
@@ -1191,13 +1252,19 @@ $('plus').onclick = () => setBpm(S.bpm + 2);
 $('btn-jouer').onclick = () => { S.serie = S.serie; jouer(); };
 $('btn-ecouter').onclick = ecouter;
 $('btn-stop').onclick = () => arreter(true);
-$('btn-calib').onclick = calibrer;
+$('btn-calib').onclick = () => {
+  $('calib-choix').hidden = !$('calib-choix').hidden; afficherLatence();
+  if (!$('calib-choix').hidden) $('calib-choix').scrollIntoView({ behavior: 'smooth', block: 'center' });
+};
+$('calib-auto').onclick = () => calibrer('auto');
+$('calib-flash').onclick = () => calibrer('flash');
+
 ['mes-de', 'mes-a'].forEach(id => $(id).onchange = () => { segment(); S.serie = 0; });
 chargerPreset(0);
 majSegments();
 
 // Accès pour les tests
-window.__coach = { lireMXL, parseTexte, parseMusicXML, doigter, analyserTempo, Detecteur, yin, evaluer, decider, nomNote };
+window.__coach = { lireMXL, parseTexte, parseMusicXML, doigter, analyserTempo, Detecteur, yin, evaluer, decider, nomNote, estimerLatence, estimerLatenceJeu };
 </script>
 </body>
 </html>
