@@ -2,206 +2,376 @@
 <html lang="fr">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Coach Piano — prototype</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111318">
+<title>Coach Piano</title>
 <style>
   :root {
-    --fond: #f6f3ee; --carte: #ffffff; --texte: #2b2620; --doux: #7a7066;
-    --accent: #3d5a80; --accent2: #5c7fa8; --ok: #2e8b57; --faux: #d1495b; --manque: #e8a33d;
-    --bord: #e4ddd3;
+    --fond: #0f1115; --fond2: #161920; --carte: #1b1f27; --carte2: #222733; --ligne: #2c3240;
+    --texte: #eef0f4; --doux: #9aa3b2; --pale: #6c7484;
+    --or: #f3b94d; --or2: #ffd88a; --ok: #3ccf8e; --faux: #ff6b7d; --manque: #f5a442; --bleu: #6aa8ff;
+    --rayon: 18px; --ombre: 0 10px 30px rgba(0,0,0,.35);
+    --d1: #ff8a65; --d2: #ffd54f; --d3: #66d18f; --d4: #4fc3f7; --d5: #b39ddb;
   }
-  * { box-sizing: border-box; }
-  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--fond); color: var(--texte); }
-  header { padding: 20px 16px 8px; max-width: 980px; margin: auto; }
-  h1 { margin: 0; font-size: 1.7rem; }
-  .sub { margin: 4px 0 0; color: var(--doux); }
-  main { max-width: 980px; margin: auto; padding: 8px 16px 40px; }
-  .carte { background: var(--carte); border: 1px solid var(--bord); border-radius: 14px; padding: 16px 18px; margin: 14px 0; }
-  h2 { margin: 0 0 12px; font-size: 1.15rem; }
-  .row { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: end; margin: 10px 0; }
-  .row.centre { justify-content: center; align-items: center; }
-  label { font-size: .9rem; color: var(--doux); display: flex; flex-direction: column; gap: 4px; }
-  label.inline { flex-direction: row; align-items: center; gap: 6px; }
-  label.bloc { display: block; }
-  input, select, textarea, button { font: inherit; }
-  input[type=number] { width: 80px; }
-  select, input[type=file] { max-width: 100%; }
-  label { min-width: 0; max-width: 100%; }
-  input, select, textarea { padding: 6px 8px; border: 1px solid var(--bord); border-radius: 8px; background: #fff; color: var(--texte); }
-  textarea { width: 100%; margin-top: 4px; font-family: ui-monospace, Menlo, monospace; font-size: .9rem; }
-  button { padding: 8px 14px; border-radius: 10px; border: 1px solid var(--bord); background: #fff; cursor: pointer; }
-  button:hover:not(:disabled) { border-color: var(--accent2); }
-  button:disabled { opacity: .45; cursor: default; }
-  button.primaire { background: var(--accent); color: #fff; border-color: var(--accent); }
-  button.gros { font-size: 1.1rem; padding: 12px 22px; }
-  code { background: #f0ebe3; padding: 1px 5px; border-radius: 4px; }
-  .msg { color: var(--faux); min-height: 1em; margin: 6px 0 0; font-size: .9rem; }
-  .petit { font-size: .85rem; color: var(--doux); }
-  .photo-bloc { background: #f4f7fb; border: 1px dashed #b9cde6; border-radius: 12px; padding: 12px 14px; margin-bottom: 8px; }
-  .bouton-photo { display: inline-block; background: var(--accent); color: #fff; padding: 10px 16px; border-radius: 10px; font-size: 1rem; cursor: pointer; font-weight: 600; }
-  #omr-canvas { width: 100%; height: auto; border: 1px solid var(--bord); border-radius: 8px; margin-top: 8px; background: #fff; }
-  #omr-etat.erreur { color: var(--faux); }
-  details.aide { font-size: .88rem; color: var(--doux); margin-top: 6px; }
-  .resume { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
-  .stat { background: #faf8f4; border: 1px solid var(--bord); border-radius: 10px; padding: 10px 12px; }
-  .stat b { display: block; font-size: 1.25rem; }
-  .stat span { font-size: .82rem; color: var(--doux); }
-  .stat.fort { background: #eef3f9; border-color: #c9d6e6; }
-  .raisons { font-size: .88rem; color: var(--doux); margin: 10px 0 0; padding-left: 18px; }
-  .partition { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
-  .mesure { display: flex; gap: 4px; padding: 6px 8px 4px; border-left: 2px solid #b9ad9e; position: relative; }
-  .mesure .num { position: absolute; top: -9px; left: 3px; font-size: .68rem; color: var(--doux); background: var(--carte); padding: 0 2px; }
-  .note { min-width: 46px; text-align: center; border: 1px solid var(--bord); border-radius: 8px; padding: 4px 4px 3px; background: #fff; transition: background .1s, transform .1s; }
-  .note .doigt { display: inline-block; width: 24px; height: 24px; line-height: 24px; border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; font-size: .9rem; }
-  .note .nom { display: block; font-size: .85rem; margin-top: 2px; font-weight: 600; }
-  .note .duree { display: block; font-size: .66rem; color: var(--doux); }
-  .note.liee { opacity: .55; border-style: dashed; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html { background: var(--fond); }
+  body { margin: 0; font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--texte);
+    background: radial-gradient(1200px 600px at 80% -10%, rgba(243,185,77,.10), transparent 60%),
+                radial-gradient(900px 500px at -10% 10%, rgba(106,168,255,.08), transparent 60%), var(--fond);
+    min-height: 100vh; padding-bottom: calc(92px + env(safe-area-inset-bottom)); }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  svg.i { width: 1.15em; height: 1.15em; vertical-align: -0.2em; flex: none; }
+
+  /* ---------- barre du haut ---------- */
+  .appbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 12px;
+    padding: calc(12px + env(safe-area-inset-top)) 18px 12px; background: rgba(15,17,21,.82); backdrop-filter: blur(14px);
+    border-bottom: 1px solid rgba(255,255,255,.05); }
+  .logo { width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center;
+    background: linear-gradient(135deg, var(--or), #e8863c); box-shadow: 0 6px 18px rgba(243,185,77,.35); color: #1b1300; }
+  .appbar h1 { margin: 0; font-size: 1.15rem; letter-spacing: .2px; }
+  .appbar .version { margin-left: auto; font-size: .72rem; color: var(--pale); border: 1px solid var(--ligne); padding: 3px 8px; border-radius: 99px; }
+
+  main { max-width: 760px; margin: 0 auto; padding: 18px 16px 24px; }
+  .vue[hidden] { display: none !important; }
+  .titre-vue { font-size: 1.6rem; margin: 6px 2px 4px; letter-spacing: -.3px; }
+  .sous-titre { color: var(--doux); margin: 0 2px 18px; font-size: .95rem; }
+
+  .carte { background: linear-gradient(180deg, var(--carte), var(--fond2)); border: 1px solid var(--ligne); border-radius: var(--rayon);
+    padding: 18px; margin: 0 0 14px; box-shadow: var(--ombre); }
+  .carte h2 { margin: 0 0 12px; font-size: 1.02rem; display: flex; align-items: center; gap: 8px; }
+  .carte h2 .i { color: var(--or); }
+  .petit { font-size: .84rem; color: var(--doux); line-height: 1.45; }
+  .msg { color: var(--faux); font-size: .88rem; margin: 8px 0 0; min-height: 0; }
+  .msg:empty { display: none; }
+  code { background: var(--carte2); color: var(--or2); padding: 1px 6px; border-radius: 6px; font-size: .85em; }
+
+  /* ---------- boutons ---------- */
+  button { cursor: pointer; border: 1px solid var(--ligne); background: var(--carte2); border-radius: 14px; padding: 11px 16px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px; transition: transform .08s, background .15s, border-color .15s, opacity .15s; }
+  button:hover:not(:disabled) { border-color: #3a4254; }
+  button:active:not(:disabled) { transform: scale(.97); }
+  button:disabled { opacity: .4; cursor: default; }
+  .primaire { background: linear-gradient(135deg, var(--or), #eb9a43); border: none; color: #1d1404; font-weight: 700; box-shadow: 0 8px 22px rgba(243,185,77,.28); }
+  .fantome { background: transparent; }
+  .large { width: 100%; }
+
+  /* ---------- import ---------- */
+  .import { position: relative; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; cursor: pointer;
+    padding: 30px 18px; border-radius: 22px; border: 1.5px dashed rgba(243,185,77,.45);
+    background: radial-gradient(400px 200px at 50% 0%, rgba(243,185,77,.14), transparent 70%), var(--carte); }
+  .import .rond { width: 74px; height: 74px; border-radius: 50%; display: grid; place-items: center; color: #1b1300;
+    background: linear-gradient(135deg, var(--or), #e8863c); box-shadow: 0 10px 30px rgba(243,185,77,.35); }
+  .import .rond svg { width: 34px; height: 34px; }
+  .import b { font-size: 1.12rem; }
+  .import span { color: var(--doux); font-size: .88rem; max-width: 420px; }
+  .import.lecture .rond { animation: pouls 1s ease-in-out infinite; }
+  @keyframes pouls { 50% { transform: scale(1.08); box-shadow: 0 10px 40px rgba(243,185,77,.6); } }
+
+  .ou { display: flex; align-items: center; gap: 12px; color: var(--pale); font-size: .8rem; margin: 18px 4px; text-transform: uppercase; letter-spacing: 1px; }
+  .ou::before, .ou::after { content: ""; flex: 1; height: 1px; background: var(--ligne); }
+
+  /* ---------- champs ---------- */
+  .champ { display: flex; flex-direction: column; gap: 7px; margin: 0 0 14px; font-size: .82rem; color: var(--doux); }
+  .champ > b { font-weight: 600; color: var(--doux); text-transform: uppercase; letter-spacing: .6px; font-size: .72rem; }
+  select, input[type=number], textarea { background: var(--fond2); border: 1px solid var(--ligne); border-radius: 12px; padding: 11px 12px; color: var(--texte); outline: none; }
+  select:focus, input:focus, textarea:focus { border-color: var(--or); }
+  textarea { width: 100%; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .86rem; line-height: 1.5; resize: vertical; }
+  input[type=file] { color: var(--doux); font-size: .85rem; max-width: 100%; }
+  input[type=file]::file-selector-button { background: var(--carte2); color: var(--texte); border: 1px solid var(--ligne); border-radius: 10px; padding: 8px 12px; margin-right: 10px; cursor: pointer; }
+  .grille2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+  @media (max-width: 480px) { .grille2 { grid-template-columns: 1fr; } }
+
+  .segment { display: flex; background: var(--fond2); border: 1px solid var(--ligne); border-radius: 14px; padding: 4px; gap: 4px; }
+  .segment button { flex: 1; border: none; background: transparent; border-radius: 10px; padding: 9px 8px; color: var(--doux); font-weight: 600; font-size: .9rem; }
+  .segment button.actif { background: var(--carte2); color: var(--texte); box-shadow: 0 2px 10px rgba(0,0,0,.35); }
+  .segment button.actif::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--or); }
+  .cache { display: none !important; }
+
+  .stepper { display: flex; align-items: center; gap: 8px; }
+  .stepper button { width: 44px; height: 44px; padding: 0; border-radius: 12px; font-size: 1.3rem; }
+  .stepper input { width: 84px; text-align: center; font-weight: 700; font-size: 1.05rem; }
+
+  details.plier { border-top: 1px solid var(--ligne); margin-top: 6px; padding-top: 12px; }
+  details.plier > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; color: var(--texte); font-weight: 600; font-size: .95rem; }
+  details.plier > summary::-webkit-details-marker { display: none; }
+  details.plier > summary::after { content: "›"; margin-left: auto; color: var(--pale); font-size: 1.3rem; transition: transform .2s; }
+  details.plier[open] > summary::after { transform: rotate(90deg); }
+  details.plier > summary .i { color: var(--or); }
+  details.plier > div { padding-top: 12px; }
+
+  /* ---------- partition / analyse ---------- */
+  .resume { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 4px; }
+  .stat { background: var(--fond2); border: 1px solid var(--ligne); border-radius: 14px; padding: 12px 14px; }
+  .stat b { display: block; font-size: 1.35rem; letter-spacing: -.3px; }
+  .stat span { font-size: .78rem; color: var(--doux); }
+  .stat.fort { grid-column: 1 / -1; background: linear-gradient(135deg, rgba(243,185,77,.16), rgba(243,185,77,.04)); border-color: rgba(243,185,77,.4); display: flex; align-items: center; gap: 14px; }
+  .stat.fort b { font-size: 2rem; color: var(--or2); }
+  .raisons { font-size: .82rem; color: var(--doux); margin: 10px 0 0; padding-left: 18px; line-height: 1.5; }
+
+  .partition { display: flex; flex-wrap: wrap; gap: 14px 8px; margin-top: 16px; }
+  .mesure { display: flex; gap: 5px; padding: 14px 8px 6px 10px; border-left: 2px solid var(--ligne); position: relative; flex-wrap: wrap; }
+  .mesure .num { position: absolute; top: -2px; left: 8px; font-size: .64rem; color: var(--pale); letter-spacing: .5px; }
+  .note { min-width: 50px; text-align: center; border-radius: 12px; padding: 6px 4px 5px; background: var(--carte2); border: 1px solid transparent;
+    transition: background .12s, transform .12s, border-color .12s; }
+  .note .doigt { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; font-weight: 800; font-size: .88rem; color: #15171c; background: var(--d1); }
+  .note[data-doigt="2"] .doigt { background: var(--d2); } .note[data-doigt="3"] .doigt { background: var(--d3); }
+  .note[data-doigt="4"] .doigt { background: var(--d4); } .note[data-doigt="5"] .doigt { background: var(--d5); }
+  .note .nom { display: block; font-size: .86rem; margin-top: 4px; font-weight: 700; }
+  .note .duree { display: block; font-size: .64rem; color: var(--pale); }
+  .note.noire-touche { background: #12141a; border-color: #2b303c; }
+  .note.liee { opacity: .5; border: 1px dashed var(--ligne); }
   .note.liee .duree::before { content: "⌒ "; }
-  .note.noire-touche .nom::after { content: " ■"; font-size: .55rem; vertical-align: middle; color: #444; }
-  .note.courante { transform: scale(1.12); background: #fff6d6; border-color: #e8c547; }
-  .note.ok { background: #e3f4ea; border-color: var(--ok); }
-  .note.faux { background: #fbe4e7; border-color: var(--faux); }
-  .note.manque { background: #fdf0db; border-color: var(--manque); }
-  .note.horsSeg { opacity: .35; }
-  .tempo { display: flex; justify-content: center; align-items: center; gap: 18px; margin: 18px 0 8px; }
-  .tempo button { width: 52px; height: 52px; border-radius: 50%; font-size: 1.6rem; padding: 0; }
-  .bpm { width: 150px; height: 150px; border-radius: 50%; border: 6px solid var(--accent); display: flex; flex-direction: column; align-items: center; justify-content: center; transition: background .06s; }
-  .bpm span { font-size: 3rem; font-weight: 800; line-height: 1; }
-  .bpm small { color: var(--doux); }
-  .bpm.flash { background: #dfe8f3; }
-  .bpm.flash.accent { background: #b9cde6; }
-  .compte { text-align: center; font-size: 1rem; color: var(--accent); min-height: 1.4em; font-weight: 600; }
-  .micro { display: flex; align-items: center; gap: 12px; justify-content: center; margin: 10px 0; font-size: .9rem; color: var(--doux); }
-  .vu { width: 160px; height: 10px; background: #eee6da; border-radius: 6px; overflow: hidden; }
-  #vu-barre { height: 100%; width: 0; background: linear-gradient(90deg, #7fb685, #e8c547, #d1495b); transition: width .05s; }
-  #note-live { min-width: 70px; font-weight: 700; color: var(--texte); }
-  .verdict { border-radius: 12px; padding: 14px 16px; margin: 14px 0; border: 1px solid var(--bord); }
-  .verdict h3 { margin: 0 0 6px; font-size: 1.2rem; }
-  .verdict.monte { background: #e3f4ea; border-color: #9fd3b3; }
-  .verdict.descend { background: #fbe4e7; border-color: #eeb0b8; }
-  .verdict.reste, .verdict.confirme { background: #fdf3df; border-color: #eccf99; }
-  .verdict.objectif { background: #e5eefa; border-color: #a9c1e3; }
-  .verdict ul { margin: 6px 0 0; padding-left: 18px; font-size: .92rem; }
-  .chiffres { display: flex; gap: 18px; flex-wrap: wrap; font-size: .92rem; margin-top: 4px; }
-  table { width: 100%; border-collapse: collapse; font-size: .88rem; margin-top: 8px; }
-  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--bord); }
-  th { color: var(--doux); font-weight: 600; }
+  .note.courante { transform: translateY(-3px) scale(1.1); border-color: var(--or); box-shadow: 0 0 0 3px rgba(243,185,77,.25); }
+  .note.ok { background: rgba(60,207,142,.16); border-color: var(--ok); }
+  .note.faux { background: rgba(255,107,125,.16); border-color: var(--faux); }
+  .note.manque { background: rgba(245,164,66,.14); border-color: var(--manque); }
+  .note.horsSeg { opacity: .3; }
+  .legende-doigts { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 14px; font-size: .76rem; color: var(--doux); }
+  .legende-doigts i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+
+  #omr-canvas { width: 100%; height: auto; border-radius: 12px; margin-top: 12px; background: #fff; display: block; }
+  #omr-etat { margin: 0 0 6px; }
+  #omr-etat.erreur { color: var(--faux); }
+  .reglages-omr { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: end; margin-top: 12px; }
+  .reglages-omr .champ { margin: 0; }
+  @media (max-width: 480px) { .reglages-omr { grid-template-columns: 1fr 1fr; } .reglages-omr button { grid-column: 1 / -1; } }
+
+  /* ---------- pratique ---------- */
+  .metronome { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 0 4px; }
+  .cadran { display: flex; align-items: center; gap: 22px; }
+  .cadran > button { width: 56px; height: 56px; border-radius: 50%; padding: 0; font-size: 1.6rem; background: var(--carte2); }
+  .bpm { position: relative; width: 196px; height: 196px; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: radial-gradient(circle at 50% 35%, #2a2f3b, #161920 70%); border: 1px solid var(--ligne);
+    box-shadow: inset 0 0 0 10px rgba(255,255,255,.02), 0 18px 40px rgba(0,0,0,.45); transition: transform .08s, box-shadow .08s; }
+  .bpm::before { content: ""; position: absolute; inset: -7px; border-radius: 50%; border: 3px solid rgba(243,185,77,.35); }
+  .bpm span { font-size: 4.2rem; font-weight: 800; line-height: 1; letter-spacing: -2px; font-variant-numeric: tabular-nums; }
+  .bpm small { color: var(--doux); letter-spacing: 3px; font-size: .72rem; margin-top: 4px; }
+  .bpm.flash { transform: scale(1.04); box-shadow: 0 0 0 6px rgba(243,185,77,.18), 0 0 40px rgba(243,185,77,.35); }
+  .bpm.flash.accent { box-shadow: 0 0 0 10px rgba(243,185,77,.3), 0 0 60px rgba(243,185,77,.6); }
+  .bpm.flash::before { border-color: var(--or); }
+  .compte { text-align: center; font-size: 1.05rem; color: var(--or2); min-height: 1.5em; font-weight: 700; letter-spacing: .3px; }
+  .actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-top: 8px; }
+  .actions .jouer { grid-column: 1 / -1; padding: 16px; font-size: 1.12rem; border-radius: 18px; }
+  .actions button:not(.jouer) { flex-direction: column; gap: 4px; font-size: .78rem; padding: 12px 6px; color: var(--doux); }
+  .actions button:not(.jouer) svg { width: 22px; height: 22px; color: var(--texte); }
+  #btn-stop:not(:disabled) { border-color: var(--faux); color: var(--faux); }
+  #btn-stop:not(:disabled) svg { color: var(--faux); }
+
+  .micro { display: flex; align-items: center; gap: 12px; margin: 16px 0 2px; font-size: .85rem; color: var(--doux); background: var(--fond2);
+    border: 1px solid var(--ligne); border-radius: 14px; padding: 10px 14px; }
+  .micro .i { color: var(--or); }
+  .vu { flex: 1; height: 8px; background: #0b0d11; border-radius: 6px; overflow: hidden; }
+  #vu-barre { height: 100%; width: 0; background: linear-gradient(90deg, var(--ok), var(--or), var(--faux)); transition: width .05s; border-radius: 6px; }
+  #note-live { min-width: 54px; text-align: right; font-weight: 800; color: var(--texte); font-size: 1rem; }
+  #etat { display: block; font-size: .84rem; color: var(--doux); margin: 8px 2px 0; min-height: 1.2em; }
+
+  .reglages { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .reglages .champ { margin: 0; }
+  .interrupteur { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid var(--ligne); font-size: .92rem; cursor: pointer; }
+  .interrupteur input { appearance: none; width: 46px; height: 28px; border-radius: 99px; background: var(--ligne); position: relative; cursor: pointer; transition: background .2s; flex: none; margin: 0; }
+  .interrupteur input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; transition: transform .2s; }
+  .interrupteur input:checked { background: var(--or); }
+  .interrupteur input:checked::after { transform: translateX(18px); }
+  .mesures-choix { display: flex; align-items: center; gap: 8px; color: var(--doux); font-size: .9rem; }
+  .mesures-choix input { width: 70px; text-align: center; }
+
+  .verdict { border-radius: var(--rayon); padding: 18px; margin: 0 0 14px; border: 1px solid var(--ligne); background: var(--carte); box-shadow: var(--ombre); animation: entre .3s ease-out; }
+  @keyframes entre { from { opacity: 0; transform: translateY(8px); } }
+  .verdict h3 { margin: 0 0 10px; font-size: 1.25rem; }
+  .verdict.monte { border-color: rgba(60,207,142,.5); background: linear-gradient(180deg, rgba(60,207,142,.14), var(--carte)); }
+  .verdict.descend { border-color: rgba(255,107,125,.5); background: linear-gradient(180deg, rgba(255,107,125,.14), var(--carte)); }
+  .verdict.reste, .verdict.confirme { border-color: rgba(245,164,66,.5); background: linear-gradient(180deg, rgba(245,164,66,.13), var(--carte)); }
+  .verdict.objectif { border-color: rgba(243,185,77,.7); background: linear-gradient(180deg, rgba(243,185,77,.22), var(--carte)); }
+  .verdict ul { margin: 10px 0 0; padding-left: 18px; font-size: .88rem; color: var(--doux); line-height: 1.5; }
+  .chiffres { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .chiffres span { background: rgba(0,0,0,.2); border-radius: 12px; padding: 8px 10px; font-size: .74rem; color: var(--doux); }
+  .chiffres b { display: block; font-size: 1.1rem; color: var(--texte); }
+
+  table { width: 100%; border-collapse: collapse; font-size: .84rem; }
+  th, td { text-align: left; padding: 9px 6px; border-bottom: 1px solid var(--ligne); }
+  th { color: var(--pale); font-weight: 600; font-size: .72rem; text-transform: uppercase; letter-spacing: .6px; }
+  tr:last-child td { border-bottom: none; }
+
+  /* ---------- onglets du bas ---------- */
+  .onglets { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 30;
+    display: flex; gap: 4px; padding: 6px; border-radius: 22px; width: min(440px, calc(100% - 24px));
+    background: rgba(27,31,39,.88); backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,.08); box-shadow: 0 14px 40px rgba(0,0,0,.5); }
+  .onglets button { flex: 1; flex-direction: column; gap: 3px; border: none; background: transparent; border-radius: 16px; padding: 9px 4px 7px; color: var(--pale); font-size: .72rem; font-weight: 600; }
+  .onglets button svg { width: 22px; height: 22px; }
+  .onglets button.actif { color: #1d1404; background: linear-gradient(135deg, var(--or), #eb9a43); }
+  .onglets button:disabled { opacity: .35; }
 </style>
 </head>
 <body>
-<header>
-  <h1>🎹 Coach Piano</h1>
-  <p class="sub">Prototype — doigtés suggérés, tempo de départ, et un métronome qui t'écoute et s'adapte. <span class="petit">(version 7)</span></p>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-note" viewBox="0 0 24 24"><path fill="currentColor" d="M9 17.5a3 3 0 1 1-2-2.83V5.2a1 1 0 0 1 .76-.97l10-2.5A1 1 0 0 1 19 2.7v12.8a3 3 0 1 1-2-2.83V6.03l-8 2V17.5z"/></symbol>
+  <symbol id="i-camera" viewBox="0 0 24 24"><path fill="currentColor" d="M9.2 3h5.6l1.6 2.2H20a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7.2a2 2 0 0 1 2-2h3.6L9.2 3zM12 8a5 5 0 1 0 0 10 5 5 0 0 0 0-10zm0 2a3 3 0 1 1 0 6 3 3 0 0 1 0-6z"/></symbol>
+  <symbol id="i-partition" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M3 6h18M3 10h18M3 14h18M3 18h18"/><circle cx="9" cy="14" r="2.4" fill="currentColor"/><path stroke="currentColor" stroke-width="2" d="M11.3 14V5"/></symbol>
+  <symbol id="i-metro" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M9 3h6l4 18H5L9 3z"/><path stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 16l5-9M7.5 15h9"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path fill="currentColor" d="M7 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5z"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="3" fill="currentColor"/></symbol>
+  <symbol id="i-son" viewBox="0 0 24 24"><path fill="currentColor" d="M4 9h4l5-4v14l-5-4H4z"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></symbol>
+  <symbol id="i-micro" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3" fill="currentColor"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M5 11a7 7 0 0 0 14 0M12 18v4"/></symbol>
+  <symbol id="i-cible" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/></symbol>
+  <symbol id="i-oeil" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3" fill="currentColor"/></symbol>
+  <symbol id="i-crayon" viewBox="0 0 24 24"><path fill="currentColor" d="M15.2 4.3l4.5 4.5L8.5 20H4v-4.5L15.2 4.3zm1.4-1.4 1.6-1.6a1.5 1.5 0 0 1 2.1 0l2.4 2.4a1.5 1.5 0 0 1 0 2.1L21.1 7.4l-4.5-4.5z"/></symbol>
+  <symbol id="i-reglage" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2.3" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="10" cy="17" r="2.3" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
+  <symbol id="i-histo" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 3v18h18M7 15l4-4 3 3 6-7"/></symbol>
+  <symbol id="i-fichier" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M6 2h8l5 5v15H6z"/><path fill="none" stroke="currentColor" stroke-width="2" d="M14 2v5h5"/></symbol>
+  <symbol id="i-calib" viewBox="0 0 24 24"><circle cx="12" cy="13" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 13V9M9 2h6"/></symbol>
+</svg>
+
+<header class="appbar">
+  <div class="logo"><svg class="i" style="width:22px;height:22px"><use href="#i-note"/></svg></div>
+  <h1>Coach Piano</h1>
+  <span class="version">version 8</span>
 </header>
+
 <main>
 
-<section class="carte">
-  <h2>1. Le morceau</h2>
-  <div class="photo-bloc">
-    <label class="bouton-photo">📷 Photo ou capture d'écran de la partition
-      <input type="file" id="photo" accept="image/*" hidden>
-    </label>
-    <div class="row">
-      <label>Clé
-        <select id="omr-cle"><option value="auto">auto</option><option value="sol">sol</option><option value="fa">fa</option></select>
-      </label>
-      <label>Armure
-        <select id="omr-armure"></select>
-      </label>
-      <button id="omr-relire" disabled>↻ Relire avec ces réglages</button>
-    </div>
-    <p id="omr-etat" class="petit">Le mieux : une capture d'écran d'un PDF, <b>zoomée</b> pour que 2 ou 3 lignes de musique remplissent l'écran (pas la page entière).
-      Tout est lu sur ton téléphone, l'image n'est envoyée nulle part.</p>
-    <div id="omr-apercu" hidden>
-      <canvas id="omr-canvas"></canvas>
-      <p class="petit">🟢 notes lues · 🟠 mesure dont la durée ne tombe pas juste (à vérifier) · 🟣 silences · traits rouges = barres de mesure.
-        Corrige le texte ci-dessous si besoin, puis clique « Analyser ».</p>
-    </div>
-  </div>
-  <div class="row">
-    <label>Exemple
-      <select id="preset"></select>
-    </label>
-    <label>…ou un fichier MusicXML (.musicxml, .xml, .mxl)
-      <input type="file" id="fichier">
-    </label>
-  </div>
-  <label class="bloc">Notes
-    <textarea id="texte" rows="3" spellcheck="false"></textarea>
+<!-- ===================== MORCEAU ===================== -->
+<section class="vue" data-vue="morceau">
+  <h2 class="titre-vue">Ton morceau</h2>
+  <p class="sous-titre">Prends ta partition en capture d'écran : je lis les notes, je propose les doigtés et le tempo de départ.</p>
+
+  <label class="import" id="zone-import">
+    <input type="file" id="photo" accept="image/*" hidden>
+    <div class="rond"><svg><use href="#i-camera"/></svg></div>
+    <b>Importer une partition</b>
+    <span>Capture d'écran <b style="font-size:inherit;color:var(--or2)">zoomée</b> sur 2 ou 3 lignes de musique. Tout est lu sur ton téléphone, rien n'est envoyé.</span>
   </label>
-  <details class="aide">
-    <summary>Comment écrire les notes ?</summary>
-    <p>Une note = nom + octave, puis <code>/durée</code> si elle change :
-      <code>Do4</code>, <code>Fa#4</code>, <code>Sib3</code> (ou <code>C4</code>, <code>F#4</code>, <code>Bb3</code>).
-      Durées : <code>/1</code> ronde, <code>/2</code> blanche, <code>/4</code> noire, <code>/8</code> croche, <code>/16</code> double-croche,
-      ajoute un point pour pointée (<code>/4.</code>). Silence : <code>R</code>. Barre de mesure : <code>|</code>.
-      Triolet : ajoute <code>t</code> à la durée (<code>Do4/8t Ré4 Mi4</code> = 3 croches en un temps).
-      Note liée à la suivante (tenue, pas rejouée) : ajoute <code>~</code>, par ex. <code>Sol4/2~ | Sol4/4</code>.
-      La durée reste la même tant que tu ne la changes pas. Do4 = le Do du milieu du piano.</p>
-    <p>Fichiers MusicXML (.musicxml, .xml ou .mxl compressé) : exportés depuis MuseScore, ou depuis une appli de scan de partition (PlayScore, ScanScore, Audiveris…).</p>
-  </details>
-  <div class="row">
-    <label>Main
-      <select id="main"><option value="droite">droite</option><option value="gauche">gauche</option></select>
-    </label>
-    <label>Tempo cible (BPM)
-      <input type="number" id="cible" min="30" max="240" value="100">
-    </label>
-    <label>Ton niveau
-      <select id="niveau">
-        <option value="debutant">débutant</option>
-        <option value="intermediaire" selected>intermédiaire</option>
-        <option value="avance">avancé</option>
+
+  <div class="ou">ou</div>
+
+  <div class="carte">
+    <div class="champ"><b>Exemple</b><select id="preset"></select></div>
+    <div class="champ"><b>Fichier MusicXML (.musicxml, .xml, .mxl)</b><input type="file" id="fichier"></div>
+    <details class="plier">
+      <summary><svg class="i"><use href="#i-crayon"/></svg> Écrire ou corriger les notes</summary>
+      <div>
+        <textarea id="texte" rows="4" spellcheck="false"></textarea>
+        <p class="petit">Une note = nom + octave, puis <code>/durée</code> si elle change : <code>Do4</code>, <code>Fa#4</code>, <code>Sib3</code>.
+          Durées : <code>/1</code> ronde, <code>/2</code> blanche, <code>/4</code> noire, <code>/8</code> croche, <code>/16</code> double,
+          point = pointée (<code>/4.</code>), <code>t</code> = triolet (<code>/8t</code>). Silence <code>R</code>, barre de mesure <code>|</code>,
+          note tenue vers la suivante <code>~</code>. Do4 = Do du milieu du piano.</p>
+      </div>
+    </details>
+  </div>
+
+  <div class="carte">
+    <h2><svg class="i"><use href="#i-reglage"/></svg> Réglages</h2>
+    <div class="champ"><b>Main</b>
+      <select id="main" class="cache"><option value="droite">droite</option><option value="gauche">gauche</option></select>
+      <div class="segment" data-pour="main"><button type="button" data-v="droite">Main droite</button><button type="button" data-v="gauche">Main gauche</button></div>
+    </div>
+    <div class="champ"><b>Ton niveau</b>
+      <select id="niveau" class="cache">
+        <option value="debutant">débutant</option><option value="intermediaire" selected>intermédiaire</option><option value="avance">avancé</option>
       </select>
-    </label>
-    <button id="btn-analyser" class="primaire">Analyser</button>
+      <div class="segment" data-pour="niveau"><button type="button" data-v="debutant">Débutant</button><button type="button" data-v="intermediaire">Interm.</button><button type="button" data-v="avance">Avancé</button></div>
+    </div>
+    <div class="champ"><b>Tempo visé (BPM)</b>
+      <div class="stepper"><button type="button" data-pas="-4" data-cible="cible">−</button><input type="number" id="cible" min="30" max="240" value="100"><button type="button" data-pas="4" data-cible="cible">+</button></div>
+    </div>
+    <button id="btn-analyser" class="primaire large"><svg class="i"><use href="#i-partition"/></svg> Analyser le morceau</button>
+    <p id="msg-morceau" class="msg"></p>
   </div>
-  <p id="msg-morceau" class="msg"></p>
 </section>
 
-<section class="carte" id="s-analyse" hidden>
-  <h2>2. Analyse et doigtés</h2>
-  <div id="resume" class="resume"></div>
-  <ul id="raisons" class="raisons"></ul>
-  <div id="partition" class="partition"></div>
-  <p class="petit">Chiffres = doigts (1 pouce, 2 index, 3 majeur, 4 annulaire, 5 auriculaire). ■ = touche noire.
-    Doigtés calculés en minimisant l'effort de la main : une suggestion, à valider avec ton professeur.</p>
+<!-- ===================== PARTITION ===================== -->
+<section class="vue" data-vue="partition" id="s-analyse" hidden>
+  <h2 class="titre-vue">Partition</h2>
+  <p class="sous-titre">Doigtés suggérés et tempo de départ conseillé.</p>
+
+  <div class="carte" id="omr-apercu" hidden>
+    <h2><svg class="i"><use href="#i-oeil"/></svg> Ce que j'ai lu</h2>
+    <p id="omr-etat" class="petit"></p>
+    <canvas id="omr-canvas"></canvas>
+    <p class="petit" style="margin-top:8px">● vert : notes lues · ● orange : mesure à vérifier · ▢ violet : silences · traits rouges : barres de mesure.</p>
+    <details class="plier">
+      <summary><svg class="i"><use href="#i-reglage"/></svg> Corriger la clé ou l'armure</summary>
+      <div class="reglages-omr">
+        <div class="champ"><b>Clé</b><select id="omr-cle"><option value="auto">auto</option><option value="sol">sol</option><option value="fa">fa</option></select></div>
+        <div class="champ"><b>Armure</b><select id="omr-armure"></select></div>
+        <button id="omr-relire" disabled>↻ Relire</button>
+      </div>
+    </details>
+  </div>
+
+  <div class="carte">
+    <div id="resume" class="resume"></div>
+    <ul id="raisons" class="raisons"></ul>
+  </div>
+
+  <div class="carte">
+    <h2><svg class="i"><use href="#i-partition"/></svg> Notes et doigtés</h2>
+    <div id="partition" class="partition"></div>
+    <div class="legende-doigts">
+      <span><i style="background:var(--d1)"></i>1 pouce</span><span><i style="background:var(--d2)"></i>2 index</span><span><i style="background:var(--d3)"></i>3 majeur</span>
+      <span><i style="background:var(--d4)"></i>4 annulaire</span><span><i style="background:var(--d5)"></i>5 auriculaire</span><span>▪ fond noir = touche noire</span>
+    </div>
+    <p class="petit" style="margin:10px 0 0">Doigtés calculés pour limiter l'effort de la main : une suggestion, à valider avec ton professeur.</p>
+  </div>
+
+  <button class="primaire large" id="aller-pratique" style="padding:16px;font-size:1.05rem;border-radius:18px"><svg class="i"><use href="#i-metro"/></svg> Pratiquer ce morceau</button>
 </section>
 
-<section class="carte" id="s-pratique" hidden>
-  <h2>3. Pratique</h2>
-  <div class="row">
-    <label class="inline">Mesures <input id="mes-de" type="number" min="1" value="1"> à <input id="mes-a" type="number" min="1" value="1"></label>
-    <label class="inline">Réussites avant d'accélérer <input id="requis" type="number" min="1" max="5" value="2"></label>
-    <label class="inline"><input type="checkbox" id="auto"> Enchaîner automatiquement</label>
-    <label class="inline"><input type="checkbox" id="clic-visuel"> Métronome visuel seulement</label>
+<!-- ===================== PRATIQUE ===================== -->
+<section class="vue" data-vue="pratique" id="s-pratique" hidden>
+  <h2 class="titre-vue">Pratique</h2>
+  <p class="sous-titre">Joue avec le métronome : je t'écoute et je te dis quand accélérer.</p>
+
+  <div class="carte">
+    <div class="metronome">
+      <div class="cadran">
+        <button id="moins" title="-2 BPM">−</button>
+        <div id="bpm-aff" class="bpm"><span id="bpm">60</span><small>BPM</small></div>
+        <button id="plus" title="+2 BPM">+</button>
+      </div>
+      <div id="compte" class="compte"></div>
+    </div>
+    <div class="actions">
+      <button id="btn-jouer" class="primaire jouer"><svg class="i"><use href="#i-play"/></svg> Jouer le passage</button>
+      <button id="btn-ecouter"><svg><use href="#i-son"/></svg>Écouter</button>
+      <button id="btn-stop" disabled><svg><use href="#i-stop"/></svg>Stop</button>
+      <button id="btn-calib"><svg><use href="#i-calib"/></svg>Calibrer</button>
+    </div>
+    <div class="micro"><svg class="i"><use href="#i-micro"/></svg><div class="vu"><div id="vu-barre"></div></div><span id="note-live">—</span></div>
+    <span id="etat"></span>
   </div>
-  <div class="tempo">
-    <button id="moins" title="-2 BPM">−</button>
-    <div id="bpm-aff" class="bpm"><span id="bpm">60</span><small>BPM</small></div>
-    <button id="plus" title="+2 BPM">+</button>
-  </div>
-  <div id="compte" class="compte"></div>
-  <div class="row centre">
-    <button id="btn-jouer" class="primaire gros">▶ Jouer le passage</button>
-    <button id="btn-ecouter">🔊 Écouter le modèle</button>
-    <button id="btn-stop" disabled>■ Stop</button>
-    <button id="btn-calib">⏱ Calibrer le micro</button>
-  </div>
-  <div class="micro">🎤 <div class="vu"><div id="vu-barre"></div></div> <span id="note-live">—</span> <span id="etat"></span></div>
+
   <div id="verdict" class="verdict" hidden></div>
-  <table id="historique" hidden>
-    <thead><tr><th>#</th><th>Tempo</th><th>Notes justes</th><th>Régularité</th><th>Conseil</th></tr></thead>
-    <tbody></tbody>
-  </table>
-  <p class="petit">💡 Mets des écouteurs (ou baisse le volume) pour que le micro entende le piano et pas le clic.
-    Pour l'instant l'écoute suit <b>une note à la fois</b> (une main, une mélodie) : les accords ne sont pas encore analysés.
-    Fais une calibration une fois au début : elle mesure le décalage de ton micro / haut-parleur.</p>
+
+  <div class="carte">
+    <h2><svg class="i"><use href="#i-reglage"/></svg> Passage et options</h2>
+    <div class="reglages">
+      <div class="champ"><b>Mesures</b><div class="mesures-choix"><input id="mes-de" type="number" min="1" value="1"> à <input id="mes-a" type="number" min="1" value="1"></div></div>
+      <div class="champ"><b>Réussites avant d'accélérer</b><input id="requis" type="number" min="1" max="5" value="2"></div>
+    </div>
+    <label class="interrupteur" style="margin-top:12px">Enchaîner les passages automatiquement <input type="checkbox" id="auto"></label>
+    <label class="interrupteur">Métronome visuel seulement (sans clic) <input type="checkbox" id="clic-visuel"></label>
+    <p class="petit" style="margin:6px 0 0">Conseils : mets des écouteurs pour que le micro n'entende pas le clic, et calibre le micro une fois.
+      L'écoute suit <b>une note à la fois</b> (une main) pour l'instant.</p>
+  </div>
+
+  <div class="carte" id="carte-historique" hidden>
+    <h2><svg class="i"><use href="#i-histo"/></svg> Tes passages</h2>
+    <table id="historique" hidden>
+      <thead><tr><th>#</th><th>Tempo</th><th>Justes</th><th>Régularité</th><th>Conseil</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
 </section>
 
 </main>
 
-<script src="omr.js?v=7"></script>
+<nav class="onglets">
+  <button class="tab actif" data-vue="morceau"><svg><use href="#i-note"/></svg>Morceau</button>
+  <button class="tab" data-vue="partition" disabled><svg><use href="#i-partition"/></svg>Partition</button>
+  <button class="tab" data-vue="pratique" disabled><svg><use href="#i-metro"/></svg>Pratique</button>
+</nav>
+
+<script src="omr.js?v=8"></script>
 <script>
 'use strict';
 // =====================================================================
@@ -583,17 +753,17 @@ function analyser() {
   afficherAnalyse();
   $('mes-de').value = 1; $('mes-a').value = m.barStarts.length; $('mes-de').max = $('mes-a').max = m.barStarts.length;
   setBpm(S.analyse.depart);
-  $('s-analyse').hidden = false; $('s-pratique').hidden = false;
+  document.querySelectorAll('.tab').forEach(t => t.disabled = false);
 }
 
 function afficherAnalyse() {
   const m = S.morceau, a = S.analyse;
   const plusRapide = nomDuree(a.ioiMin);
+  const nbJouees = m.events.filter(e => !e.liee).length;
   $('resume').innerHTML = `
-    <div class="stat"><b>${m.events.length}</b><span>notes · ${m.barStarts.length} mesure(s)</span></div>
-    <div class="stat"><b>${plusRapide}</b><span>valeur la plus rapide</span></div>
-    <div class="stat"><b>${a.notesSec.toFixed(1)} /s</b><span>notes par seconde au tempo cible (${S.cible})</span></div>
-    <div class="stat fort"><b>${a.depart} BPM</b><span>tempo de départ conseillé (${Math.round(a.depart / S.cible * 100)} % du tempo cible)</span></div>`;
+    <div class="stat fort"><b>${a.depart}</b><span>BPM conseillés pour commencer<br>${Math.round(a.depart / S.cible * 100)} % de ton tempo visé (${S.cible})</span></div>
+    <div class="stat"><b>${nbJouees}</b><span>notes · ${m.barStarts.length} mesure(s)</span></div>
+    <div class="stat"><b>${a.notesSec.toFixed(1)}/s</b><span>au tempo visé · plus rapide : ${plusRapide}</span></div>`;
   $('raisons').innerHTML = a.raisons.map(r => `<li>${r}</li>`).join('');
   const part = $('partition'); part.innerHTML = ''; S.cartes = [];
   let mesureEl = null, barCourante = -1;
@@ -604,6 +774,7 @@ function afficherAnalyse() {
     }
     const c = document.createElement('div');
     c.className = 'note' + (estNoire(e.midi) ? ' noire-touche' : '') + (e.liee ? ' liee' : '');
+    c.dataset.doigt = e.doigt;
     c.innerHTML = `<span class="doigt">${e.doigt}</span><span class="nom">${nomNote(e.midi)}</span><span class="duree">${nomDuree(e.dur)}</span>`;
     c.title = `Mesure ${e.bar} — ${nomNote(e.midi)}, doigt ${e.doigt}`;
     mesureEl.appendChild(c); S.cartes[i] = c;
@@ -809,13 +980,13 @@ function afficherVerdict(r, d, p) {
   if (r.extras > Math.max(1, r.n * 0.05)) conseils.push(`${r.extras} note(s) en trop entendue(s) (accrochages, ou bruit / clic capté par le micro).`);
   const v = $('verdict'); v.className = 'verdict ' + d.action; v.hidden = false;
   v.innerHTML = `<h3>${titres[d.action]}</h3>
-    <div class="chiffres"><span>Notes justes : <b>${r.justes}/${r.n}</b> (${Math.round(r.precision * 100)} %)</span>
-    <span>Régularité : <b>±${Math.round(r.ecartMs)} ms</b></span><span>Tempo joué : <b>${p.bpm}</b></span></div>
+    <div class="chiffres"><span><b>${Math.round(r.precision * 100)} %</b>notes justes (${r.justes}/${r.n})</span>
+    <span><b>±${Math.round(r.ecartMs)} ms</b>régularité</span><span><b>${p.bpm}</b>BPM joués</span></div>
     ${conseils.length ? '<ul>' + conseils.map(c => `<li>${c}</li>`).join('') + '</ul>' : ''}`;
 }
 
 function afficherHistorique() {
-  const t = $('historique'); t.hidden = false;
+  const t = $('historique'); t.hidden = false; $('carte-historique').hidden = false;
   const noms = { monte: '⬆️ monter', descend: '⬇️ descendre', reste: '➡️ rester', confirme: '✅ confirmer', objectif: '🎉 objectif' };
   t.tBodies[0].innerHTML = S.historique.map((h, i) =>
     `<tr><td>${i + 1}</td><td>${h.bpm}</td><td>${Math.round(h.r.precision * 100)} %</td><td>±${Math.round(h.r.ecartMs)} ms</td><td>${noms[h.d.action]}</td></tr>`).reverse().join('');
@@ -866,10 +1037,34 @@ function arreter(manuel = true) {
 function chargerPreset(i) {
   const p = PRESETS[i]; S.fichierXML = null; $('fichier').value = ''; S.omrImage = null; S.tempsParMesure = 4; $('omr-apercu').hidden = true; $('omr-relire').disabled = true;
   $('texte').value = p.texte; $('main').value = p.main; $('cible').value = p.cible;
-  analyser();
+  majSegments(); analyser();
 }
 PRESETS.forEach((p, i) => $('preset').add(new Option(p.nom, i)));
-$('preset').onchange = e => chargerPreset(+e.target.value);
+$('preset').onchange = e => { chargerPreset(+e.target.value); onglet('partition'); };
+
+// ---------- Onglets, boutons segmentés, + / − ----------
+function onglet(nom) {
+  document.querySelectorAll('.vue').forEach(v => v.hidden = v.dataset.vue !== nom);
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('actif', t.dataset.vue === nom));
+  window.scrollTo({ top: 0 });
+}
+document.querySelectorAll('.tab').forEach(t => t.onclick = () => onglet(t.dataset.vue));
+$('aller-pratique').onclick = () => onglet('pratique');
+function majSegments() {
+  document.querySelectorAll('.segment').forEach(sg => {
+    const v = $(sg.dataset.pour).value;
+    sg.querySelectorAll('button').forEach(b => b.classList.toggle('actif', b.dataset.v === v));
+  });
+}
+document.querySelectorAll('.segment button').forEach(b => b.onclick = () => {
+  const sel = $(b.parentElement.dataset.pour);
+  if (sel.value === b.dataset.v) return;
+  sel.value = b.dataset.v; majSegments(); sel.dispatchEvent(new Event('change'));
+});
+document.querySelectorAll('.stepper button').forEach(b => b.onclick = () => {
+  const inp = $(b.dataset.cible);
+  inp.value = Math.max(+inp.min, Math.min(+inp.max, (+inp.value || 0) + +b.dataset.pas));
+});
 $('texte').oninput = () => { S.fichierXML = null; $('fichier').value = ''; };
 // Lecture d'un .mxl (zip) sans bibliothèque externe
 async function lireMXL(buf) {
@@ -916,7 +1111,7 @@ $('fichier').onchange = async e => {
     if (t.tempo) $('cible').value = t.tempo;
     $('texte').value = '(chargé depuis ' + f.name + ')';
   } catch (err) { $('msg-morceau').textContent = 'Impossible de lire ce fichier : ' + err.message; S.fichierXML = null; return; }
-  analyser();
+  analyser(); if (S.morceau && S.morceau.events.length) onglet('partition');
 };
 // ---------- Lecture d'une photo / capture de partition ----------
 (() => {
@@ -944,12 +1139,15 @@ async function chargerImage(fichier) {
 
 function lirePartition() {
   if (!S.omrImage) return;
+  $('zone-import').classList.add('lecture');
+  $('omr-apercu').hidden = false; document.querySelector('.tab[data-vue="partition"]').disabled = false; onglet('partition');
   const etat = $('omr-etat'); etat.classList.remove('erreur');
   etat.textContent = '⏳ Lecture de la partition…';
   setTimeout(() => {
     let R;
     try { R = OMR.analyser(S.omrImage, { main: $('main').value, cle: $('omr-cle').value, armure: $('omr-armure').value }); }
     catch (e) { R = { erreur: 'Erreur pendant la lecture : ' + e.message }; }
+    $('zone-import').classList.remove('lecture');
     if (R.erreur || !R.nbNotes) {
       etat.classList.add('erreur');
       etat.textContent = R.erreur || 'Aucune note reconnue. Essaie une image plus nette, bien droite, cadrée sur la partition.';
@@ -987,7 +1185,7 @@ $('photo').onchange = async e => {
 $('omr-relire').onclick = lirePartition;
 $('main').addEventListener('change', () => { if (S.omrImage && !S.fichierXML) lirePartition(); });
 
-$('btn-analyser').onclick = analyser;
+$('btn-analyser').onclick = () => { analyser(); if (S.morceau && S.morceau.events.length) onglet('partition'); };
 $('moins').onclick = () => setBpm(S.bpm - 2);
 $('plus').onclick = () => setBpm(S.bpm + 2);
 $('btn-jouer').onclick = () => { S.serie = S.serie; jouer(); };
@@ -996,6 +1194,7 @@ $('btn-stop').onclick = () => arreter(true);
 $('btn-calib').onclick = calibrer;
 ['mes-de', 'mes-a'].forEach(id => $(id).onchange = () => { segment(); S.serie = 0; });
 chargerPreset(0);
+majSegments();
 
 // Accès pour les tests
 window.__coach = { lireMXL, parseTexte, parseMusicXML, doigter, analyserTempo, Detecteur, yin, evaluer, decider, nomNote };
