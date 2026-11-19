@@ -229,7 +229,7 @@
 <header class="appbar">
   <div class="logo"><svg class="i" style="width:22px;height:22px"><use href="#i-note"/></svg></div>
   <h1>Coach Piano</h1>
-  <span class="version">version 9</span>
+  <span class="version">version 10</span>
 </header>
 
 <main>
@@ -385,7 +385,7 @@
   <button class="tab" data-vue="pratique" disabled><svg><use href="#i-metro"/></svg>Pratique</button>
 </nav>
 
-<script src="omr.js?v=9"></script>
+<script src="omr.js?v=10"></script>
 <script>
 'use strict';
 // =====================================================================
@@ -625,60 +625,133 @@ function yin(buf, sr, fmin = 45, fmax = 2100, seuil = 0.15) {
   return { f, clarte: 1 - b, midi: 69 + 12 * Math.log2(f / 440) };
 }
 
+// ---------- Spectres ----------
+function fft(re, im) { // FFT complexe en place (taille = puissance de 2)
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1; for (; j & bit; bit >>= 1) j ^= bit; j ^= bit;
+    if (i < j) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang), h = len >> 1;
+    for (let i = 0; i < n; i += len) {
+      let cr = 1, ci = 0;
+      for (let k = 0; k < h; k++) {
+        const a = i + k, b = a + h, xr = re[b] * cr - im[b] * ci, xi = re[b] * ci + im[b] * cr;
+        re[b] = re[a] - xr; im[b] = im[a] - xi; re[a] += xr; im[a] += xi;
+        const t = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = t;
+      }
+    }
+  }
+}
+const hann = n => { const w = new Float32Array(n); for (let i = 0; i < n; i++) w[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (n - 1)); return w; };
+function spectre(x, w, kmax) {
+  const n = x.length, re = new Float64Array(n), im = new Float64Array(n);
+  for (let i = 0; i < n; i++) re[i] = x[i] * w[i];
+  fft(re, im);
+  const m = new Float32Array(Math.min(n >> 1, kmax || n));
+  for (let k = 0; k < m.length; k++) m[k] = Math.hypot(re[k], im[k]);
+  return m;
+}
+// Saillance harmonique : pour chaque note MIDI, somme pondérée des partiels (fondamentale + harmoniques)
+function saillances(D, sr, N) {
+  const df = sr / N, S = new Float32Array(128);
+  for (let m = 28; m <= 100; m++) {
+    const f0 = 440 * Math.pow(2, (m - 69) / 12);
+    let sc = 0;
+    for (let hh = 1; hh <= 8; hh++) {
+      const fh = hh * f0 * Math.sqrt(1 + 0.0003 * hh * hh); // légère inharmonicité du piano
+      if (fh > 3000) break;
+      const c = fh / df, tol = Math.max(0.6, 0.012 * c);
+      let v = 0; for (let k = Math.max(1, Math.round(c - tol)); k <= Math.round(c + tol) && k < D.length; k++) v = Math.max(v, D[k]);
+      sc += Math.sqrt(v) / Math.pow(hh, 0.55);
+    }
+    S[m] = sc;
+  }
+  return S;
+}
+
+// ---------- Détecteur de notes jouées (piano) ----------
+// Attaques : flux spectral (apparition de nouvelles fréquences) → marche aussi en legato et avec la pédale.
+// Hauteur : spectre juste APRÈS l'attaque moins spectre juste AVANT (ce qui vient d'être joué seulement),
+// puis la note dont la série harmonique explique le mieux ce nouveau son.
 class Detecteur {
   constructor(sr, opts = {}) {
-    this.sr = sr; this.hop = 256; this.win = 512; this.size = 1 << 17; this.mask = this.size - 1;
-    this.buf = new Float32Array(this.size); this.fin = null; this.prochainHop = null;
-    this.hist = []; this.bruit = -70; this.dernierOnset = -1e9; this.montee = opts.montee ?? 6;
-    this.evenements = []; this.enAttente = null; this.niveau = -100;
+    this.sr = sr; this.size = 1 << 18; this.mask = this.size - 1; this.buf = new Float32Array(this.size); this.fin = null;
+    this.N = 1024; this.hop = 256; this.wN = hann(this.N); this.kFlux = Math.round(3000 * this.N / sr);
+    this.NP = 4096; this.wP = hann(this.NP); this.kP = Math.round(3200 * this.NP / sr) + 2;
+    this.prochain = null; this.prec = null; this.trames = [];
+    this.bruit = -70; this.niveau = -100; this.evenements = []; this.attente = []; this.dernier = -1;
+    this.k = opts.k ?? 1.4; this.delta = opts.delta ?? 1.0; this.hMin = opts.hMin ?? 0.35; this.rMin = opts.rMin ?? 0.08;
   }
   push(frame, data) {
-    if (this.fin === null) { this.fin = frame; this.prochainHop = frame + this.win; }
-    if (frame !== this.fin) { this.fin = frame; if (this.prochainHop < frame) this.prochainHop = frame; }
+    if (this.fin === null) { this.fin = frame; this.prochain = frame + this.N; }
+    if (frame !== this.fin) { this.fin = frame; if (this.prochain < frame) this.prochain = frame; }
     for (let i = 0; i < data.length; i++) this.buf[(this.fin + i) & this.mask] = data[i];
     this.fin += data.length;
-    while (this.prochainHop <= this.fin) { this.hopSuivant(this.prochainHop); this.prochainHop += this.hop; }
+    while (this.prochain <= this.fin) { this.trame(this.prochain); this.prochain += this.hop; }
     this.hauteurs();
   }
-  fenetre(fin, len) {
-    const out = new Float32Array(len);
-    for (let i = 0; i < len; i++) out[i] = this.buf[(fin - len + i) & this.mask];
-    return out;
-  }
-  hopSuivant(e) {
-    let s = 0;
-    for (let i = e - this.win; i < e; i++) { const v = this.buf[i & this.mask]; s += v * v; }
-    const db = 10 * Math.log10(s / this.win + 1e-12); this.niveau = db;
-    const t = e / this.sr;
-    const minRecent = this.hist.length ? Math.min(...this.hist) : db;
-    if (db < this.bruit) this.bruit = db; else this.bruit += 0.01;
-    const seuil = Math.max(this.bruit + 12, -60);
-    if (db > seuil && db - minRecent >= this.montee && t - this.dernierOnset > 0.07) {
-      this.dernierOnset = t;
-      if (this.enAttente) this.finaliser();
-      this.enAttente = { t: (e - this.hop) / this.sr, db, midis: [], req: [0.045, 0.075, 0.105].map(x => e + Math.round(x * this.sr)) };
+  fenetre(fin, len) { const out = new Float32Array(len); for (let i = 0; i < len; i++) out[i] = this.buf[(fin - len + i) & this.mask]; return out; }
+  trame(e) {
+    const x = this.fenetre(e, this.N);
+    let s = 0; for (let i = 0; i < x.length; i++) s += x[i] * x[i];
+    const db = 10 * Math.log10(s / this.N + 1e-12); this.niveau = db;
+    if (db < this.bruit) this.bruit = db; else this.bruit += 0.004;
+    const m = spectre(x, this.wN, this.kFlux), L = new Float32Array(m.length);
+    for (let k = 0; k < m.length; k++) L[k] = Math.log(1 + 100 * m[k]);
+    let f = 0;
+    if (this.prec) for (let k = 2; k < L.length; k++) { const d = L[k] - this.prec[k]; if (d > 0) f += d; }
+    this.prec = L;
+    this.trames.push({ e, f, db });
+    if (this.trames.length > 400) this.trames.shift();
+    // décision avec 3 trames de recul (maximum local)
+    const T = this.trames, i = T.length - 4;
+    if (i < 4) return;
+    const c = T[i];
+    for (let j = i - 3; j <= i + 3; j++) if (j !== i && T[j].f > c.f) return;
+    const loc = T.slice(Math.max(0, i - 40), i).map(o => o.f).sort((a, b) => a - b);
+    const med = loc.length ? loc[loc.length >> 1] : 0;
+    const dbMax = Math.max(T[i].db, T[i + 1].db, T[i + 2].db, T[i + 3].db);
+    const t = (c.e - this.N / 2 - this.hop / 2) / this.sr;
+    if (c.f > this.k * med + this.delta && dbMax > Math.max(this.bruit + 10, -70) && t - this.dernier > 0.05) {
+      this.dernier = t;
+      const so = Math.round(t * this.sr);
+      this.attente.push({ t, so, db: dbMax, pret: so + Math.round(0.012 * this.sr) + this.NP });
     }
-    this.hist.push(db); if (this.hist.length > 8) this.hist.shift();
   }
   hauteurs() {
-    const p = this.enAttente; if (!p) return;
-    while (p.req.length && p.req[0] <= this.fin) {
-      const r = yin(this.fenetre(p.req.shift(), 2048), this.sr);
-      if (r && r.clarte > 0.6) p.midis.push(Math.round(r.midi));
+    while (this.attente.length && this.attente[0].pret <= this.fin) this.analyser(this.attente.shift());
+  }
+  analyser(p) {
+    const apres = spectre(this.fenetre(p.pret, this.NP), this.wP, this.kP);
+    const avant = spectre(this.fenetre(p.so - Math.round(0.004 * this.sr), this.NP), this.wP, this.kP);
+    const D = new Float32Array(apres.length); let nouv = 0, tot = 0;
+    for (let k = 0; k < D.length; k++) { D[k] = Math.max(0, apres[k] - 1.05 * avant[k]); nouv += D[k] * D[k]; tot += apres[k] * apres[k]; }
+    const S = saillances(D, this.sr, this.NP);
+    let best = 28; for (let m = 28; m <= 100; m++) if (S[m] > S[best]) best = m;
+    let moy = 0; for (let m = 28; m <= 100; m++) moy += S[m]; moy /= 73;
+    // harmonicité : part de l'énergie nouvelle portée par les partiels de la note (un choc/bruit l'étale partout)
+    let surH = 0; const f0 = 440 * Math.pow(2, (best - 69) / 12), df = this.sr / this.NP, vus = new Set();
+    for (let hh = 1; hh <= 12; hh++) {
+      const c = hh * f0 * Math.sqrt(1 + 0.0003 * hh * hh) / df; if (c >= D.length) break;
+      for (let k = Math.round(c - 2); k <= Math.round(c + 2); k++) if (k > 0 && k < D.length && !vus.has(k)) { vus.add(k); surH += D[k] * D[k]; }
     }
-    if (!p.req.length) this.finaliser();
+    const harmonicite = nouv > 0 ? surH / nouv : 0;
+    const part = tot > 0 ? nouv / tot : 0; // part d'énergie vraiment nouvelle
+    let net = S[best] > 1.8 * moy && part > this.rMin && harmonicite > this.hMin;
+    // écho de la même note juste après son attaque (2e « bosse » du marteau) : ignoré sauf vraie nouvelle frappe
+    const prec = this.evenements[this.evenements.length - 1];
+    if (net && prec && prec.midi != null && p.t - prec.t < 0.15 && mod12(prec.midi - best) === 0 && part < 0.45) net = false;
+    const sal = new Float32Array(128); if (S[best] > 0) for (let m = 0; m < 128; m++) sal[m] = S[m] / S[best];
+    if (net || !prec || p.t - prec.t >= 0.15) this.evenements.push({ t: p.t, midi: net ? best : null, db: p.db, sal: net ? sal : null, part });
   }
-  finaliser() {
-    const p = this.enAttente; this.enAttente = null; if (!p) return;
-    let midi = null;
-    if (p.midis.length) { const s = [...p.midis].sort((a, b) => a - b); midi = s[Math.floor((s.length - 1) / 2)]; }
-    this.evenements.push({ t: p.t, midi, db: p.db });
-  }
-  flush() { this.finaliser(); }
+  flush() { while (this.attente.length) { const p = this.attente.shift(); if (p.so + 0.012 * this.sr + 1024 <= this.fin) this.analyser(p); } }
   hauteurActuelle() {
     if (this.fin === null || this.niveau < this.bruit + 8) return null;
-    const r = yin(this.fenetre(this.fin, 2048), this.sr);
-    return r && r.clarte > 0.6 ? Math.round(r.midi) : null;
+    const S = saillances(spectre(this.fenetre(this.fin, this.NP), this.wP, this.kP), this.sr, this.NP);
+    let best = 28; for (let m = 28; m <= 100; m++) if (S[m] > S[best]) best = m;
+    return S[best] > 0 ? best : null;
   }
 }
 
@@ -696,7 +769,8 @@ function evaluer(attendus, detectes) {
     detectes.forEach((d, j) => {
       if (utilises.has(j)) return;
       const dt = d.t - a.t; if (Math.abs(dt) > tol) return;
-      const bon = d.midi != null && mod12(d.midi - a.midi) === 0; // même note (octave tolérée)
+      const present = d.sal && Math.max(d.sal[a.midi] || 0, d.sal[a.midi + 12] || 0, d.sal[a.midi - 12] || 0) >= 0.85;
+      const bon = d.midi != null && (mod12(d.midi - a.midi) === 0 || present); // même note (octave tolérée), ou nettement présente
       const s = Math.abs(dt) + (bon ? 0 : 1);
       if (s < score) { score = s; best = { j, dt, bon, joue: d.midi }; }
     });
@@ -837,8 +911,8 @@ async function preparerMicro() {
   const src = ctx.createMediaStreamSource(stream);
   // passe-bas : le clic du métronome est aigu (≈4 kHz), le piano est analysé sous 2 kHz
   const hp = new BiquadFilterNode(ctx, { type: 'highpass', frequency: 40 });
-  const lp1 = new BiquadFilterNode(ctx, { type: 'lowpass', frequency: 1900 });
-  const lp2 = new BiquadFilterNode(ctx, { type: 'lowpass', frequency: 1900 });
+  const lp1 = new BiquadFilterNode(ctx, { type: 'lowpass', frequency: 3300 });
+  const lp2 = new BiquadFilterNode(ctx, { type: 'lowpass', frequency: 3300 });
   const muet = new GainNode(ctx, { gain: 0 });
   det = new Detecteur(ctx.sampleRate);
   let prise;
@@ -873,7 +947,7 @@ function boucleMicro() {
 
 function clic(t, accent) {
   if ($('clic-visuel').checked) return;
-  const o = new OscillatorNode(ctx, { frequency: accent ? 4400 : 3600 });
+  const o = new OscillatorNode(ctx, { frequency: accent ? 7200 : 6400 });
   const g = new GainNode(ctx, { gain: 0 });
   g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(accent ? 0.5 : 0.3, t + 0.001);
   g.gain.exponentialRampToValueAtTime(0.0001, t + 0.03);
