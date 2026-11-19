@@ -352,6 +352,8 @@ function analyser(G, opts = {}) {
   const bLignes = debug.fin ? binariser(G, fen, 0.95) : b;
   const portees = trouverPortees(bLignes, w, h, est.s, est.t);
   if (!portees.length) return { erreur: 'Aucune portée trouvée. Essaie une image plus nette, bien droite, et cadrée sur la partition.', debug, G };
+  // binarisation stricte : forme des altérations (sur une image floue, le gris entre deux traits ne doit pas les fusionner)
+  const bForme = binariser(G, fen, 0.75);
   // 3. suppression des lignes
   const B2 = supprimerLignes(b, w, h, portees);
   const I2 = integrale(w, h, B2);
@@ -473,9 +475,12 @@ function analyser(G, opts = {}) {
   tetes.forEach(t => { if (!T.some(o => o.P === t.P && Math.abs(o.x - t.x) < 0.8 * t.P.s && Math.abs(o.p - t.p) <= 1)) T.push(t); });
 
   // 6. hampes (sur une image agrandie, les hampes fines deviennent gris très clair : binarisation dédiée)
-  const bH = debug.fin ? binariser(G, fen, 0.985) : null;
+  // seuil absolu (tout ce qui est nettement plus sombre que le papier) : suit une hampe gris clair jusqu'au bout
+  const bAbs = binariser(G, (Math.round(fen * 3) | 1), 0.93); // fond mesuré sur une large zone (peu influencé par les têtes)
+  const bHbase = debug.fin ? binariser(G, fen, 0.985) : null;
+  let bH = bHbase;
   const noirH = (x, y) => bH ? (x >= 0 && y >= 0 && x < w && y < h && (bH[(y | 0) * w + (x | 0)] === 1 || B2[(y | 0) * w + (x | 0)] === 1)) : noir(x, y);
-  const trouMax = bH ? 2 : 1;
+  const trouMaxDe = () => (bH ? 2 : 1);
   const longueurHampe = (xa, xb, y0, dir) => {
     let best = 0, col = -1;
     for (let x = Math.round(xa); x <= Math.round(xb); x++) {
@@ -483,7 +488,7 @@ function analyser(G, opts = {}) {
       const sL = est.s;
       while (y >= 0 && y < h) {
         if (noirH(x, y)) { n += 1 + trou; trou = 0; }
-        else if (trou < trouMax) trou++;
+        else if (trou < trouMaxDe()) trou++;
         else {
           // coupure plus longue : la hampe reprend-elle un peu plus loin dans la même colonne ?
           let saut = 0;
@@ -503,13 +508,22 @@ function analyser(G, opts = {}) {
   };
   T.forEach(t => {
     const s = t.P.s;
-    const up = longueurHampe(t.x + 0.25 * s, t.x + 0.85 * s, t.y, -1);
-    const dn = longueurHampe(t.x - 0.85 * s, t.x - 0.25 * s, t.y, +1);
+    let up = longueurHampe(t.x + 0.25 * s, t.x + 0.85 * s, t.y, -1);
+    let dn = longueurHampe(t.x - 0.85 * s, t.x - 0.25 * s, t.y, +1);
+    if (Math.max(up.len, dn.len) < 3.0 * s) {
+      // hampe trop courte : peut-être gris clair (image floue) → 2e essai au seuil absolu
+      bH = bAbs;
+      const up2 = longueurHampe(t.x + 0.25 * s, t.x + 0.85 * s, t.y, -1), dn2 = longueurHampe(t.x - 0.85 * s, t.x - 0.25 * s, t.y, +1);
+      bH = bHbase;
+      if (up2.len > up.len) up = up2; if (dn2.len > dn.len) dn = dn2;
+    }
     const lmin = 2.3 * s;
     if (up.len >= lmin && up.len >= dn.len) { t.hampe = { dir: -1, col: up.col, bout: t.y - up.len, len: up.len }; }
     else if (dn.len >= lmin) { t.hampe = { dir: 1, col: dn.col, bout: t.y + dn.len, len: dn.len }; }
   });
   debug.avantHampe = T.slice();
+  // petite note d'ornement (appoggiature) ou bout de ligature : « noire » à hampe très courte → ignorée
+  T = T.filter(t => !(t.plein && t.hampe && (t.traits || 0) === 0 && t.hampe.len < 2.5 * t.P.s));
   // une note loin au-dessus / au-dessous de la portée doit avoir une ligne supplémentaire entre elle et la portée
   // (élimine p. ex. la petite note de l'indication de tempo « ♩ = 89 »)
   const ligneSupp = (x, y, s) => {
@@ -568,6 +582,28 @@ function analyser(G, opts = {}) {
     }
     t.traits = Math.min(3, maxN);
   });
+
+  // fausse tête sur une ligature : elle « partage » la hampe d'une vraie tête, mais de l'autre côté.
+  // On garde la plus compacte (une ligature est un long trait horizontal).
+  {
+    const largeurNoire = t => {
+      const y = Math.round(t.y); let g = Math.round(t.x), d = Math.round(t.x);
+      while (g > 0 && noir(g - 1, y)) g--; while (d < w - 1 && noir(d + 1, y)) d++;
+      return (d - g + 1) / t.P.s;
+    };
+    const fausses = new Set();
+    for (const A of T) for (const B of T) {
+      if (A === B || A.P !== B.P || !A.hampe || !B.hampe || A.hampe.dir === B.hampe.dir) continue;
+      const s = A.P.s;
+      if (Math.abs(A.hampe.col - B.hampe.col) > 0.4 * s || Math.abs(A.x - B.x) > 1.2 * s) continue;
+      // la vraie note a sa ligature au bout de la hampe ; la fausse (posée sur la ligature) a une tête au bout
+      if (A.plein && B.plein && (A.traits || 0) === 0 && (B.traits || 0) >= 1) { fausses.add(A); continue; }
+      if (A.plein && B.plein && (B.traits || 0) === 0 && (A.traits || 0) >= 1) { fausses.add(B); continue; }
+      const la = largeurNoire(A), lb = largeurNoire(B);
+      if (la > lb + 0.4 && la > 1.6) fausses.add(A); else if (lb > la + 0.4 && lb > 1.6) fausses.add(B);
+    }
+    T = T.filter(t => !fausses.has(t));
+  }
 
   // 8. points de prolongation
   T.forEach(t => {
@@ -653,6 +689,27 @@ function analyser(G, opts = {}) {
       }
     });
   });
+  // barres touchées par un autre symbole (liaison, crochet…) : recherche colonne par colonne
+  portees.forEach(P => {
+    const s = P.s, ya = Math.round(P.haut + 1), yb = Math.round(P.bas - 1);
+    let deb = -1;
+    const fermer = x => {
+      if (deb < 0) return;
+      const xc = (deb + x - 1) / 2, larg = x - deb; deb = -1;
+      if (larg > 0.5 * s) return;
+      // pas la hampe d'une note de cette portée
+      if (T.some(t => t.P === P && t.hampe && Math.abs(t.hampe.col - xc) < 0.35 * s)) return;
+      // pas collée à une tête (hampe d'accord, etc.)
+      if (T.some(t => t.P === P && Math.abs(t.x - xc) < 0.9 * s)) return;
+      barres.get(P).push(xc);
+    };
+    for (let x = Math.round(P.debutMusique); x <= Math.min(w - 1, P.droite + 2); x++) {
+      let ok = true, trou = 0;
+      for (let y = ya; y <= yb; y++) { if (noir(x, y)) trou = 0; else if (++trou > 2) { ok = false; break; } }
+      if (ok) { if (deb < 0) deb = x; } else fermer(x);
+    }
+    fermer(Math.min(w - 1, P.droite + 2) + 1);
+  });
   barres.forEach((xs, P) => { xs.sort((a, c) => a - c); const m = []; xs.forEach(x => { if (!m.length || x - m[m.length - 1] > 1.2 * P.s) m.push(x); else m[m.length - 1] = x; }); barres.set(P, m); });
 
   // 11. altérations accidentelles
@@ -662,9 +719,23 @@ function analyser(G, opts = {}) {
     const proches = parPortee.get(t.P).filter(c => !avecTete.has(c.id) && c.x1 < t.x - 0.45 * s && c.x1 > t.x - 2.6 * s && c.y1 > t.y - 2.5 * s && c.y0 < t.y + 2.5 * s);
     const cands = grouper(proches, s).filter(g => g.x1 > t.x - 2.4 * s && g.h > 1.8 * s && g.h < 3.6 * s && g.w > 0.35 * s && g.w < 1.3 * s && g.y0 < t.y && g.y1 > t.y &&
       Math.abs((g.y0 + g.y1) / 2 - t.y) < 1.1 * s);   // une altération est centrée sur sa note (le bémol un peu plus haut)
-    if (!cands.length) return;
+    if (!cands.length) {
+      // altération collée à la tête : on regarde directement les pixels juste à gauche de la tête
+      const xa = Math.round(t.x - 1.7 * s), xb = Math.round(t.x - 0.62 * s), ya = Math.round(t.y - 1.8 * s), yb = Math.round(t.y + 1.8 * s);
+      let x0 = Infinity, x1 = -1, y0 = Infinity, y1 = -1;
+      for (let y = Math.max(0, ya); y <= Math.min(h - 1, yb); y++) for (let x = Math.max(0, xa); x <= Math.min(w - 1, xb); x++)
+        if (B2[y * w + x]) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+      if (x1 < 0) return;
+      const g2 = { x0, x1, y0, y1, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+      if (g2.h < 1.8 * s || g2.h > 3.6 * s || g2.w < 0.35 * s || g2.w > 1.3 * s || Math.abs((y0 + y1) / 2 - t.y) > 1.1 * s) return;
+      // pas une hampe / ligature d'une note voisine : il faut un vrai symbole (deux traits, ou un bémol)
+      if (T.some(o => o !== t && o.P === t.P && o.hampe && o.hampe.col >= x0 - 1 && o.hampe.col <= x1 + 1)) return; // hampe d'une voisine
+      if (formeAlteration(bForme, w, g2, t.P) !== 'diese') return; // repli réservé aux dièses (deux traits nets)
+      t.alteration = 'diese'; return;
+    }
     const g = cands.sort((a, d) => d.x1 - a.x1)[0];
     let f = formeAlteration(b, w, g, t.P);
+    if (f !== 'diese' && formeAlteration(bForme, w, g, t.P) === 'diese') f = 'diese'; // dièse flou : deux traits visibles en stricte
     if (f === 'autre') return;
     if (f !== 'diese' && (t.y - g.y0) > 1.2 * s && (g.y1 - t.y) < 0.9 * s) f = 'bemol';
     else if (f === 'bemol' && Math.abs((g.y0 + g.y1) / 2 - t.y) < 0.4 * s) f = 'becarre';
@@ -867,8 +938,9 @@ function analyser(G, opts = {}) {
   // longue d'exactement la différence, on raccourcit le silence
   {
     // durée de référence : mesures sans silence si possible (un silence mal lu fausse la durée)
-    const sansSil = mesures.filter((m, i) => i > 0 && i < mesures.length - 1 && !m.evs.some(e => e.type === 'silence'));
-    const f1 = {}; (sansSil.length >= 2 ? sansSil : mesures).forEach(m => { const k = Math.round(m.duree * 12) / 12; f1[k] = (f1[k] || 0) + 1; });
+    let sansSil = mesures.filter((m, i) => i > 0 && i < mesures.length - 1 && !m.evs.some(e => e.type === 'silence'));
+    if (sansSil.length < 2) { const tous = mesures.filter(m => !m.evs.some(e => e.type === 'silence')); if (tous.length >= 1) sansSil = tous.length >= sansSil.length ? tous : sansSil; }
+    const f1 = {}; (sansSil.length >= 1 ? sansSil : mesures).forEach(m => { const k = Math.round(m.duree * 12) / 12; f1[k] = (f1[k] || 0) + 1; });
     const norm1 = +Object.keys(f1).sort((a, c) => f1[c] - f1[a] || c - a)[0] || 4;
     mesures.forEach(m => {
       const exces = m.duree - norm1;
