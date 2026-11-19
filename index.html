@@ -229,7 +229,7 @@
 <header class="appbar">
   <div class="logo"><svg class="i" style="width:22px;height:22px"><use href="#i-note"/></svg></div>
   <h1>Coach Piano</h1>
-  <span class="version">version 10</span>
+  <span class="version">version 11</span>
 </header>
 
 <main>
@@ -347,7 +347,7 @@
       <button id="calib-auto" class="primaire large"><svg class="i"><use href="#i-son"/></svg> Automatique : rien à jouer</button>
       <p class="petit">Le téléphone émet 8 bips et s'écoute lui-même (sans écouteurs). Le plus précis.</p>
       <button id="calib-flash" class="large"><svg class="i"><use href="#i-calib"/></svg> En jouant sur le flash (sans son)</button>
-      <p class="petit">Le cercle clignote 8 fois : joue toujours la même note (par ex. un Do) à chaque flash.</p>
+      <p class="petit">Le cercle clignote 8 fois : joue une note (n'importe laquelle) à chaque flash.</p>
       <p class="petit" id="calib-actuel"></p>
     </div>
     <div class="micro"><svg class="i"><use href="#i-micro"/></svg><div class="vu"><div id="vu-barre"></div></div><span id="note-live">—</span></div>
@@ -385,7 +385,7 @@
   <button class="tab" data-vue="pratique" disabled><svg><use href="#i-metro"/></svg>Pratique</button>
 </nav>
 
-<script src="omr.js?v=10"></script>
+<script src="omr.js?v=11"></script>
 <script>
 'use strict';
 // =====================================================================
@@ -1105,14 +1105,19 @@ function estimerLatence(instants, evenements, accepte, tol = 0.03, fen = [-0.2, 
   return { ok: true, latence: lat, n: choisis.length, ecartMs };
 }
 
-// En jouant : on garde la note (classe de hauteur) qui revient sur le plus de flashs, puis estimation robuste
+// En jouant sur le flash : n'importe quelle note nette compte (pas besoin de toujours jouer la même) ;
+// tolérance adaptée à la précision d'une main qui suit un flash (±150 ms autour du décalage commun)
 function estimerLatenceJeu(instants, evenements) {
-  let meilleur = { ok: false, n: 0 };
-  for (let pc = 0; pc < 12; pc++) {
-    const R = estimerLatence(instants, evenements, e => e.midi != null && mod12(e.midi) === pc, 0.06, [-0.3, 0.5]);
-    if (R.n > meilleur.n || (R.n === meilleur.n && R.ok && R.ecartMs < meilleur.ecartMs)) meilleur = R;
-  }
-  return meilleur;
+  const R = estimerLatence(instants, evenements, e => e.midi != null, 0.15, [-0.35, 0.6]);
+  if (!R.ok) return R;
+  // affinage : moyenne des mesures retenues (plus stable que la médiane avec une main humaine)
+  const ev = evenements.filter(e => e.midi != null), vals = [];
+  instants.forEach(t => {
+    let best = null; ev.forEach(e => { const d = e.t - t; if (Math.abs(d - R.latence) <= 0.15 && (best == null || Math.abs(d - R.latence) < Math.abs(best - R.latence))) best = d; });
+    if (best != null) vals.push(best);
+  });
+  const moy = vals.reduce((a, b) => a + b, 0) / vals.length;
+  return Object.assign(R, { latence: moy, n: vals.length });
 }
 
 function bip(t) { // bip court et net à 880 Hz (La5), facile à reconnaître même dans le bruit
@@ -1145,7 +1150,7 @@ async function calibrer(mode) {
   S.passe = { mode: mode === 'auto' ? 'calib-auto' : 'calib', attendus: [], t0, debut: t0 + pre * spb, fin: t0 + (pre + n) * spb, spb, bpb: mode === 'auto' ? 1 : 4, temps: pre + n };
   det.flush(); det.evenements = [];
   etatBoutons(true); animer();
-  $('etat').textContent = mode === 'auto' ? 'Calibration automatique : silence pendant les 8 bips…' : 'Après le décompte, joue toujours la même note (par ex. un Do) à chaque flash du cercle.';
+  $('etat').textContent = mode === 'auto' ? 'Calibration automatique : silence pendant les 8 bips…' : 'Après le décompte, joue une note (n\'importe laquelle) à chaque flash du cercle.';
   S.timer = setTimeout(() => {
     det.flush();
     const res = mode === 'auto'
