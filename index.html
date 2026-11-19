@@ -1108,10 +1108,16 @@ function estimerLatence(instants, evenements, accepte, tol = 0.03, fen = [-0.2, 
 // En jouant sur le flash : n'importe quelle note nette compte (pas besoin de toujours jouer la même) ;
 // tolérance adaptée à la précision d'une main qui suit un flash (±150 ms autour du décalage commun)
 function estimerLatenceJeu(instants, evenements) {
-  const R = estimerLatence(instants, evenements, e => e.midi != null, 0.15, [-0.35, 0.6]);
+  // si la même note revient sur au moins 6 flashs, on ne garde qu'elle (encore plus sûr dans le bruit)
+  let filtre = e => e.midi != null;
+  for (let pc = 0; pc < 12; pc++) {
+    const Rpc = estimerLatence(instants, evenements, e => e.midi != null && mod12(e.midi) === pc, 0.15, [-0.35, 0.6]);
+    if (Rpc.ok && Rpc.n >= 6) { filtre = e => e.midi != null && mod12(e.midi) === pc; break; }
+  }
+  const R = estimerLatence(instants, evenements, filtre, 0.15, [-0.35, 0.6]);
   if (!R.ok) return R;
   // affinage : moyenne des mesures retenues (plus stable que la médiane avec une main humaine)
-  const ev = evenements.filter(e => e.midi != null), vals = [];
+  const ev = evenements.filter(filtre), vals = [];
   instants.forEach(t => {
     let best = null; ev.forEach(e => { const d = e.t - t; if (Math.abs(d - R.latence) <= 0.15 && (best == null || Math.abs(d - R.latence) < Math.abs(best - R.latence))) best = d; });
     if (best != null) vals.push(best);
